@@ -1,134 +1,111 @@
 const nodemailer = require('nodemailer');
 const handlebars = require('handlebars');
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
 
 class EmailService {
   constructor() {
-    this.transporter = null;
-    this.initializeTransporter();
+    this.transporter = this.createTransporter();
+    this.templates = {};
+    this.loadTemplates();
   }
 
-  async initializeTransporter() {
-    try {
-      // Create transporter based on environment
-      if (process.env.NODE_ENV === 'production') {
-        this.transporter = nodemailer.createTransporter({
-          host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT) || 587,
-          secure: process.env.SMTP_SECURE === 'true',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASSWORD
-          }
-        });
-      } else {
-        // Use Ethereal for development
-        const testAccount = await nodemailer.createTestAccount();
-        this.transporter = nodemailer.createTransporter({
-          host: 'smtp.ethereal.email',
-          port: 587,
-          secure: false,
-          auth: {
-            user: testAccount.user,
-            pass: testAccount.pass
-          }
-        });
+  createTransporter() {
+    const config = {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD
       }
+    };
 
-      // Verify connection
-      await this.transporter.verify();
-      logger.info('Email service initialized successfully');
-    } catch (error) {
-      logger.error('Failed to initialize email service:', error);
-      throw error;
-    }
+    const transporter = nodemailer.createTransporter(config);
+
+    // Verify connection configuration
+    transporter.verify((error, success) => {
+      if (error) {
+        logger.error('Email service configuration error:', error);
+      } else {
+        logger.info('Email service is ready to send messages');
+      }
+    });
+
+    return transporter;
   }
 
-  async loadTemplate(templateName, data) {
-    try {
-      const templatePath = path.join(__dirname, '..', 'templates', `${templateName}.hbs`);
-      const templateContent = await fs.readFile(templatePath, 'utf8');
-      const template = handlebars.compile(templateContent);
-      return template(data);
-    } catch (error) {
-      logger.error(`Failed to load email template ${templateName}:`, error);
-      // Return a basic template if file doesn't exist
-      return this.getBasicTemplate(templateName, data);
+  loadTemplates() {
+    const templatesDir = path.join(__dirname, '../templates/email');
+    
+    // Create templates directory if it doesn't exist
+    if (!fs.existsSync(templatesDir)) {
+      fs.mkdirSync(templatesDir, { recursive: true });
     }
-  }
 
-  getBasicTemplate(templateName, data) {
-    const templates = {
-      welcome: `
-        <h2>Welcome to Tender Management System</h2>
-        <p>Hello ${data.name},</p>
+    // Default templates
+    this.templates = {
+      welcome: handlebars.compile(`
+        <h1>Welcome to Tender Management System</h1>
+        <p>Hello {{name}},</p>
         <p>Welcome to our tender management platform. Your account has been created successfully.</p>
         <p>You can now log in and start managing tenders.</p>
         <p>Best regards,<br>Tender Management Team</p>
-      `,
-      passwordReset: `
-        <h2>Password Reset Request</h2>
-        <p>Hello ${data.name},</p>
-        <p>You requested a password reset. Click the link below to reset your password:</p>
-        <p><a href="${data.resetLink}">Reset Password</a></p>
+      `),
+      passwordReset: handlebars.compile(`
+        <h1>Password Reset Request</h1>
+        <p>Hello {{name}},</p>
+        <p>You have requested to reset your password. Click the link below to reset it:</p>
+        <p><a href="{{resetLink}}">Reset Password</a></p>
         <p>This link will expire in 1 hour.</p>
         <p>If you didn't request this, please ignore this email.</p>
         <p>Best regards,<br>Tender Management Team</p>
-      `,
-      tenderInvitation: `
-        <h2>Tender Invitation</h2>
-        <p>Hello ${data.vendorName},</p>
+      `),
+      tenderInvitation: handlebars.compile(`
+        <h1>Tender Invitation</h1>
+        <p>Hello {{vendorName}},</p>
         <p>You have been invited to participate in a tender:</p>
-        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
-        <p><strong>Deadline:</strong> ${data.deadline}</p>
-        <p><strong>Description:</strong> ${data.description}</p>
-        <p><a href="${data.tenderLink}">View Tender Details</a></p>
+        <h2>{{tenderTitle}}</h2>
+        <p><strong>Description:</strong> {{tenderDescription}}</p>
+        <p><strong>Deadline:</strong> {{deadline}}</p>
+        <p><a href="{{tenderLink}}">View Tender Details</a></p>
         <p>Best regards,<br>Tender Management Team</p>
-      `,
-      bidSubmitted: `
-        <h2>Bid Submitted Successfully</h2>
-        <p>Hello ${data.vendorName},</p>
-        <p>Your bid has been submitted successfully for:</p>
-        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
-        <p><strong>Bid Amount:</strong> $${data.bidAmount}</p>
-        <p><strong>Submitted At:</strong> ${data.submittedAt}</p>
-        <p>You will be notified once the evaluation is complete.</p>
+      `),
+      bidSubmitted: handlebars.compile(`
+        <h1>Bid Submitted Successfully</h1>
+        <p>Hello {{vendorName}},</p>
+        <p>Your bid for the tender "{{tenderTitle}}" has been submitted successfully.</p>
+        <p><strong>Bid Amount:</strong> ${{bidAmount}}</p>
+        <p><strong>Submitted At:</strong> {{submittedAt}}</p>
+        <p>You will be notified once the tender evaluation is complete.</p>
         <p>Best regards,<br>Tender Management Team</p>
-      `,
-      tenderAwarded: `
-        <h2>Congratulations! Tender Awarded</h2>
-        <p>Hello ${data.vendorName},</p>
-        <p>Congratulations! Your bid has been selected for:</p>
-        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
-        <p><strong>Winning Bid:</strong> $${data.bidAmount}</p>
-        <p>We will contact you soon with further details.</p>
+      `),
+      tenderAwarded: handlebars.compile(`
+        <h1>Congratulations! Tender Awarded</h1>
+        <p>Hello {{vendorName}},</p>
+        <p>Congratulations! Your bid for the tender "{{tenderTitle}}" has been selected.</p>
+        <p><strong>Winning Bid Amount:</strong> ${{bidAmount}}</p>
+        <p>Our team will contact you soon with further details.</p>
         <p>Best regards,<br>Tender Management Team</p>
-      `
+      `)
     };
-    return templates[templateName] || `<p>Email content for ${templateName}</p>`;
   }
 
-  async sendEmail(to, subject, templateName, data) {
+  async sendEmail(to, subject, template, data) {
     try {
-      const html = await this.loadTemplate(templateName, data);
+      const html = this.templates[template](data);
       
       const mailOptions = {
-        from: process.env.SMTP_USER || 'noreply@tendermanagement.com',
+        from: `"Tender Management System" <${process.env.SMTP_USER}>`,
         to,
         subject,
         html
       };
 
-      const info = await this.transporter.sendMail(mailOptions);
-      
-      if (process.env.NODE_ENV !== 'production') {
-        logger.info('Preview URL: ' + nodemailer.getTestMessageUrl(info));
-      }
-      
-      logger.info(`Email sent successfully to ${to}`);
-      return info;
+      const result = await this.transporter.sendMail(mailOptions);
+      logger.info(`Email sent successfully to ${to}`, { messageId: result.messageId });
+      return result;
     } catch (error) {
       logger.error(`Failed to send email to ${to}:`, error);
       throw error;
@@ -163,8 +140,8 @@ class EmailService {
       {
         vendorName: vendor.name,
         tenderTitle: tender.title,
+        tenderDescription: tender.description,
         deadline: new Date(tender.deadline).toLocaleDateString(),
-        description: tender.description,
         tenderLink
       }
     );
@@ -195,24 +172,6 @@ class EmailService {
         bidAmount: bid.amount
       }
     );
-  }
-
-  async sendBulkEmails(emails) {
-    const results = [];
-    for (const emailData of emails) {
-      try {
-        const result = await this.sendEmail(
-          emailData.to,
-          emailData.subject,
-          emailData.template,
-          emailData.data
-        );
-        results.push({ success: true, email: emailData.to, result });
-      } catch (error) {
-        results.push({ success: false, email: emailData.to, error: error.message });
-      }
-    }
-    return results;
   }
 }
 

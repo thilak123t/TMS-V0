@@ -9,8 +9,8 @@ const { Server } = require('socket.io');
 const path = require('path');
 require('dotenv').config();
 
-// Import utilities and middleware
 const logger = require('./src/utils/logger');
+const { connectDB } = require('./src/config/database');
 const errorHandler = require('./src/middleware/errorHandler');
 
 // Import routes
@@ -26,7 +26,7 @@ const dashboardRoutes = require('./src/routes/dashboard');
 const app = express();
 const server = createServer(app);
 
-// Initialize Socket.IO
+// Socket.IO setup
 const io = new Server(server, {
   cors: {
     origin: process.env.SOCKET_CORS_ORIGIN || "http://localhost:3000",
@@ -34,55 +34,37 @@ const io = new Server(server, {
   }
 });
 
-// Make io available to routes
-app.set('io', io);
-
-// Security middleware
-app.use(helmet());
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
-
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
-app.use('/api/', limiter);
 
-// Body parsing middleware
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
+app.use(compression());
+app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Compression middleware
-app.use(compression());
-
-// Logging middleware
-if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan('combined', {
-    stream: {
-      write: (message) => logger.info(message.trim())
-    }
-  }));
-}
+app.use(limiter);
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+// Make io available to routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
 });
 
-// API routes
+// Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/tenders', tenderRoutes);
@@ -92,27 +74,31 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   logger.info(`User connected: ${socket.id}`);
 
-  // Join user to their personal room for notifications
-  socket.on('join', (userId) => {
-    socket.join(`user_${userId}`);
-    logger.info(`User ${userId} joined their notification room`);
+  socket.on('join-room', (userId) => {
+    socket.join(`user-${userId}`);
+    logger.info(`User ${userId} joined room user-${userId}`);
   });
 
-  // Handle tender room joining
-  socket.on('join_tender', (tenderId) => {
-    socket.join(`tender_${tenderId}`);
-    logger.info(`User joined tender room: ${tenderId}`);
-  });
-
-  // Handle disconnection
   socket.on('disconnect', () => {
     logger.info(`User disconnected: ${socket.id}`);
   });
 });
+
+// Error handling middleware
+app.use(errorHandler);
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -122,21 +108,33 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handling middleware (must be last)
-app.use(errorHandler);
+const PORT = process.env.PORT || 5000;
 
 // Start server
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-});
+const startServer = async () => {
+  try {
+    // Connect to database
+    await connectDB();
+    
+    // Start server
+    server.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+      logger.info(`Environment: ${process.env.NODE_ENV}`);
+      logger.info(`Frontend URL: ${process.env.FRONTEND_URL}`);
+    });
+  } catch (error) {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down gracefully');
   server.close(() => {
     logger.info('Process terminated');
-    process.exit(0);
   });
 });
 
@@ -144,8 +142,7 @@ process.on('SIGINT', () => {
   logger.info('SIGINT received, shutting down gracefully');
   server.close(() => {
     logger.info('Process terminated');
-    process.exit(0);
   });
 });
 
-module.exports = { app, server, io };
+module.exports = app;
