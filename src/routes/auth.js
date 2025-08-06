@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
-const { validate, schemas } = require('../middleware/validation');
+const { validate, userSchemas } = require('../middleware/validation');
 const { authenticateToken } = require('../middleware/auth');
 const emailService = require('../services/emailService');
 const logger = require('../utils/logger');
@@ -20,22 +20,12 @@ const generateToken = (userId) => {
 // @route   POST /api/auth/register
 // @desc    Register a new user
 // @access  Public
-router.post('/register', validate(schemas.userRegistration), async (req, res, next) => {
+router.post('/register', validate(userSchemas.register), async (req, res, next) => {
   try {
-    const {
-      email,
-      password,
-      first_name,
-      last_name,
-      role,
-      company_name,
-      phone,
-      address
-    } = req.body;
+    const { email, password, first_name, last_name, role, company_name, phone } = req.body;
 
     // Check if user already exists
     const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
-    
     if (existingUser.rows.length > 0) {
       return res.status(409).json({
         success: false,
@@ -44,15 +34,15 @@ router.post('/register', validate(schemas.userRegistration), async (req, res, ne
     }
 
     // Hash password
-    const saltRounds = 12;
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
     const result = await query(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role, company_name, phone, address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, email, first_name, last_name, role, company_name, created_at`,
-      [email, hashedPassword, first_name, last_name, role, company_name, phone, address]
+      `INSERT INTO users (email, password, first_name, last_name, role, company_name, phone, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+       RETURNING id, email, first_name, last_name, role, company_name, phone, is_active, created_at`,
+      [email, hashedPassword, first_name, last_name, role, company_name, phone]
     );
 
     const user = result.rows[0];
@@ -60,15 +50,18 @@ router.post('/register', validate(schemas.userRegistration), async (req, res, ne
     // Generate token
     const token = generateToken(user.id);
 
-    // Send welcome email (don't wait for it)
-    emailService.sendWelcomeEmail({
-      email: user.email,
-      name: `${user.first_name} ${user.last_name}`
-    }).catch(error => {
-      logger.error('Failed to send welcome email:', error);
-    });
+    // Send welcome email
+    try {
+      await emailService.sendWelcomeEmail({
+        email: user.email,
+        name: `${user.first_name} ${user.last_name}`
+      });
+    } catch (emailError) {
+      logger.error('Failed to send welcome email:', emailError);
+      // Don't fail registration if email fails
+    }
 
-    logger.info(`New user registered: ${user.email} (${user.role})`);
+    logger.info('User registered successfully:', { userId: user.id, email: user.email });
 
     res.status(201).json({
       success: true,
@@ -81,6 +74,8 @@ router.post('/register', validate(schemas.userRegistration), async (req, res, ne
           last_name: user.last_name,
           role: user.role,
           company_name: user.company_name,
+          phone: user.phone,
+          is_active: user.is_active,
           created_at: user.created_at
         },
         token
@@ -94,14 +89,13 @@ router.post('/register', validate(schemas.userRegistration), async (req, res, ne
 // @route   POST /api/auth/login
 // @desc    Login user
 // @access  Public
-router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
+router.post('/login', validate(userSchemas.login), async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
     // Get user with password
     const result = await query(
-      `SELECT id, email, password_hash, first_name, last_name, role, company_name, is_active, last_login
-       FROM users WHERE email = $1`,
+      'SELECT id, email, password, first_name, last_name, role, company_name, phone, is_active FROM users WHERE email = $1',
       [email]
     );
 
@@ -114,7 +108,7 @@ router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
 
     const user = result.rows[0];
 
-    // Check if account is active
+    // Check if user is active
     if (!user.is_active) {
       return res.status(401).json({
         success: false,
@@ -123,8 +117,7 @@ router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
     }
 
     // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
-    
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -138,7 +131,7 @@ router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
     // Generate token
     const token = generateToken(user.id);
 
-    logger.info(`User logged in: ${user.email}`);
+    logger.info('User logged in successfully:', { userId: user.id, email: user.email });
 
     res.json({
       success: true,
@@ -151,7 +144,8 @@ router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
           last_name: user.last_name,
           role: user.role,
           company_name: user.company_name,
-          last_login: user.last_login
+          phone: user.phone,
+          is_active: user.is_active
         },
         token
       }
@@ -162,9 +156,9 @@ router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
 });
 
 // @route   POST /api/auth/forgot-password
-// @desc    Request password reset
+// @desc    Send password reset email
 // @access  Public
-router.post('/forgot-password', validate(schemas.passwordResetRequest), async (req, res, next) => {
+router.post('/forgot-password', validate(userSchemas.forgotPassword), async (req, res, next) => {
   try {
     const { email } = req.body;
 
@@ -178,7 +172,7 @@ router.post('/forgot-password', validate(schemas.passwordResetRequest), async (r
       // Don't reveal if email exists or not
       return res.json({
         success: true,
-        message: 'If the email exists, a password reset link has been sent'
+        message: 'If an account with that email exists, a password reset link has been sent.'
       });
     }
 
@@ -186,22 +180,29 @@ router.post('/forgot-password', validate(schemas.passwordResetRequest), async (r
 
     // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
+    const resetTokenExpiry = new Date(Date.now() + parseInt(process.env.PASSWORD_RESET_EXPIRES) || 3600000); // 1 hour
 
     // Save reset token
     await query(
-      'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3',
+      'UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3',
       [resetToken, resetTokenExpiry, user.id]
     );
 
     // Send reset email
-    await emailService.sendPasswordResetEmail(user, resetToken);
-
-    logger.info(`Password reset requested for: ${user.email}`);
+    try {
+      await emailService.sendPasswordResetEmail(user, resetToken);
+      logger.info('Password reset email sent:', { userId: user.id, email: user.email });
+    } catch (emailError) {
+      logger.error('Failed to send password reset email:', emailError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to send password reset email'
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Password reset link has been sent to your email'
+      message: 'Password reset link has been sent to your email.'
     });
   } catch (error) {
     next(error);
@@ -211,15 +212,13 @@ router.post('/forgot-password', validate(schemas.passwordResetRequest), async (r
 // @route   POST /api/auth/reset-password
 // @desc    Reset password with token
 // @access  Public
-router.post('/reset-password', validate(schemas.passwordReset), async (req, res, next) => {
+router.post('/reset-password', validate(userSchemas.resetPassword), async (req, res, next) => {
   try {
     const { token, password } = req.body;
 
     // Find user with valid reset token
     const result = await query(
-      `SELECT id, email, first_name, last_name 
-       FROM users 
-       WHERE reset_token = $1 AND reset_token_expiry > NOW() AND is_active = true`,
+      'SELECT id, email FROM users WHERE reset_token = $1 AND reset_token_expires > NOW() AND is_active = true',
       [token]
     );
 
@@ -233,18 +232,16 @@ router.post('/reset-password', validate(schemas.passwordReset), async (req, res,
     const user = result.rows[0];
 
     // Hash new password
-    const saltRounds = 12;
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Update password and clear reset token
     await query(
-      `UPDATE users 
-       SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL, updated_at = NOW()
-       WHERE id = $2`,
+      'UPDATE users SET password = $1, reset_token = NULL, reset_token_expires = NULL, updated_at = NOW() WHERE id = $2',
       [hashedPassword, user.id]
     );
 
-    logger.info(`Password reset completed for: ${user.email}`);
+    logger.info('Password reset successfully:', { userId: user.id, email: user.email });
 
     res.json({
       success: true,
@@ -258,18 +255,17 @@ router.post('/reset-password', validate(schemas.passwordReset), async (req, res,
 // @route   POST /api/auth/change-password
 // @desc    Change password for authenticated user
 // @access  Private
-router.post('/change-password', authenticateToken, validate(schemas.passwordChange), async (req, res, next) => {
+router.post('/change-password', authenticateToken, validate(userSchemas.changePassword), async (req, res, next) => {
   try {
     const { current_password, new_password } = req.body;
     const userId = req.user.id;
 
-    // Get current password hash
-    const result = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    // Get current password
+    const result = await query('SELECT password FROM users WHERE id = $1', [userId]);
     const user = result.rows[0];
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(current_password, user.password_hash);
-    
+    const isCurrentPasswordValid = await bcrypt.compare(current_password, user.password);
     if (!isCurrentPasswordValid) {
       return res.status(400).json({
         success: false,
@@ -278,16 +274,16 @@ router.post('/change-password', authenticateToken, validate(schemas.passwordChan
     }
 
     // Hash new password
-    const saltRounds = 12;
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
     const hashedPassword = await bcrypt.hash(new_password, saltRounds);
 
     // Update password
     await query(
-      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
       [hashedPassword, userId]
     );
 
-    logger.info(`Password changed for user: ${req.user.email}`);
+    logger.info('Password changed successfully:', { userId });
 
     res.json({
       success: true,
@@ -304,9 +300,7 @@ router.post('/change-password', authenticateToken, validate(schemas.passwordChan
 router.get('/me', authenticateToken, async (req, res, next) => {
   try {
     const result = await query(
-      `SELECT id, email, first_name, last_name, role, company_name, phone, address, 
-              bio, website, linkedin, is_active, created_at, updated_at, last_login
-       FROM users WHERE id = $1`,
+      'SELECT id, email, first_name, last_name, role, company_name, phone, bio, is_active, created_at, last_login FROM users WHERE id = $1',
       [req.user.id]
     );
 
@@ -325,30 +319,13 @@ router.get('/me', authenticateToken, async (req, res, next) => {
 // @desc    Logout user (client-side token removal)
 // @access  Private
 router.post('/logout', authenticateToken, (req, res) => {
-  logger.info(`User logged out: ${req.user.email}`);
+  // In a stateless JWT system, logout is handled client-side by removing the token
+  // Here we just confirm the logout
+  logger.info('User logged out:', { userId: req.user.id });
   
   res.json({
     success: true,
     message: 'Logged out successfully'
-  });
-});
-
-// @route   POST /api/auth/verify-token
-// @desc    Verify if token is valid
-// @access  Private
-router.post('/verify-token', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    message: 'Token is valid',
-    data: {
-      user: {
-        id: req.user.id,
-        email: req.user.email,
-        first_name: req.user.first_name,
-        last_name: req.user.last_name,
-        role: req.user.role
-      }
-    }
   });
 });
 

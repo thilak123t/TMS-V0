@@ -1,13 +1,8 @@
-const jwt = require("jsonwebtoken")
-const { query } = require("../config/database")
-const logger = require("../utils/logger")
+const jwt = require('jsonwebtoken');
+const { query } = require('../config/database');
+const logger = require('../utils/logger');
 
-/**
- * Middleware to verify JWT token
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- * @param {Function} next - Express next function
- */
+// Middleware to verify JWT token
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -16,7 +11,7 @@ const authenticateToken = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({
         success: false,
-        message: 'Access token required'
+        message: 'Access token is required'
       });
     }
 
@@ -72,12 +67,8 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-/**
- * Middleware to check user roles
- * @param {string[]} roles - Array of roles allowed to access the resource
- * @returns {Function} - Express middleware
- */
-const authorize = (...roles) => {
+// Middleware to check user roles
+const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
@@ -97,11 +88,7 @@ const authorize = (...roles) => {
   };
 };
 
-/**
- * Middleware to check if user owns resource or is admin
- * @param {string} userIdField - Field name in request body/query params that contains the user ID
- * @returns {Function} - Express middleware
- */
+// Middleware to check if user owns resource or is admin
 const authorizeOwnerOrAdmin = (userIdField = 'user_id') => {
   return (req, res, next) => {
     if (!req.user) {
@@ -132,6 +119,6 @@ const authorizeOwnerOrAdmin = (userIdField = 'user_id') => {
 
 module.exports = {
   authenticateToken,
-  authorize,
+  authorizeRoles,
   authorizeOwnerOrAdmin
 };

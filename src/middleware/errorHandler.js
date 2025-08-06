@@ -5,7 +5,7 @@ const errorHandler = (err, req, res, next) => {
   error.message = err.message;
 
   // Log error
-  logger.error('Error:', {
+  logger.error('Error occurred:', {
     message: err.message,
     stack: err.stack,
     url: req.url,
@@ -56,6 +56,17 @@ const errorHandler = (err, req, res, next) => {
 
   if (err.code === '23502') { // Not null violation
     const message = 'Required field is missing';
+    error = { message, statusCode: 400 };
+  }
+
+  // File upload errors
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    const message = 'File too large';
+    error = { message, statusCode: 413 };
+  }
+
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    const message = 'Unexpected file field';
     error = { message, statusCode: 400 };
   }
 
