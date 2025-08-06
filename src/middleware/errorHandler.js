@@ -1,5 +1,11 @@
 const logger = require('../utils/logger');
 
+// Async handler wrapper
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+// Global error handler
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
@@ -36,10 +42,37 @@ const errorHandler = (err, req, res, next) => {
     error = { message, statusCode: 401 };
   }
 
+  // PostgreSQL errors
+  if (err.code === '23505') { // Unique violation
+    const message = 'Duplicate entry';
+    error = { message, statusCode: 409 };
+  }
+
+  if (err.code === '23503') { // Foreign key violation
+    const message = 'Referenced record not found';
+    error = { message, statusCode: 400 };
+  }
+
+  if (err.code === '23502') { // Not null violation
+    const message = 'Required field missing';
+    error = { message, statusCode: 400 };
+  }
+
   res.status(error.statusCode || 500).json({
     success: false,
     error: error.message || 'Server Error'
   });
 };
 
-module.exports = errorHandler;
+// 404 handler
+const notFound = (req, res, next) => {
+  const error = new Error(`Not found - ${req.originalUrl}`);
+  res.status(404);
+  next(error);
+};
+
+module.exports = {
+  asyncHandler,
+  errorHandler,
+  notFound
+};

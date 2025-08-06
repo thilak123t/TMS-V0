@@ -1,14 +1,13 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const morgan = require('morgan');
-const path = require('path');
-require('dotenv').config();
 
 const logger = require('./src/utils/logger');
-const errorHandler = require('./src/middleware/errorHandler');
+const { errorHandler, notFound } = require('./src/middleware/errorHandler');
 
 // Import routes
 const authRoutes = require('./src/routes/auth');
@@ -17,12 +16,12 @@ const tenderRoutes = require('./src/routes/tenders');
 const bidRoutes = require('./src/routes/bids');
 const commentRoutes = require('./src/routes/comments');
 const notificationRoutes = require('./src/routes/notifications');
-const uploadRoutes = require('./src/routes/uploads');
 const dashboardRoutes = require('./src/routes/dashboard');
+const uploadRoutes = require('./src/routes/uploads');
 
 const app = express();
 
-// Trust proxy
+// Trust proxy for rate limiting
 app.set('trust proxy', 1);
 
 // Security middleware
@@ -34,15 +33,18 @@ app.use(helmet({
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // limit each IP to 100 requests per windowMs in production
+  message: {
+    success: false,
+    error: 'Too many requests from this IP, please try again later.'
+  },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -67,16 +69,13 @@ if (process.env.NODE_ENV === 'development') {
   }));
 }
 
-// Static files
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
-    status: 'OK',
+    success: true,
+    message: 'Server is running',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV
+    uptime: process.uptime()
   });
 });
 
@@ -87,35 +86,42 @@ app.use('/api/tenders', tenderRoutes);
 app.use('/api/bids', bidRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/uploads', uploadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/uploads', uploadRoutes);
 
 // 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Route not found'
+app.use(notFound);
+
+// Global error handler
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 5000;
+
+const server = app.listen(PORT, () => {
+  logger.info(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err, promise) => {
+  logger.error('Unhandled Rejection:', err);
+  // Close server & exit process
+  server.close(() => {
+    process.exit(1);
   });
 });
 
-// Error handling middleware
-app.use(errorHandler);
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught Exception:', err);
+  process.exit(1);
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  logger.info('SIGINT received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+  server.close(() => {
+    logger.info('Process terminated');
+  });
 });
 
 module.exports = app;
