@@ -1,64 +1,50 @@
-const winston = require("winston")
-const path = require("path")
+const winston = require('winston');
+const path = require('path');
+const fs = require('fs');
 
-// Define log levels
-const levels = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  http: 3,
-  debug: 4,
+// Create logs directory if it doesn't exist
+const logsDir = path.join(__dirname, '../../logs');
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir, { recursive: true });
 }
 
-// Define log level based on environment
-const level = () => {
-  const env = process.env.NODE_ENV || "development"
-  const isDevelopment = env === "development"
-  return isDevelopment ? "debug" : "info"
-}
+// Define log format
+const logFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.json()
+);
 
-// Define colors for each level
-const colors = {
-  error: "red",
-  warn: "yellow",
-  info: "green",
-  http: "magenta",
-  debug: "blue",
-}
-
-// Add colors to winston
-winston.addColors(colors)
-
-// Define the format for logs
-const format = winston.format.combine(
-  winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss:ms" }),
-  winston.format.colorize({ all: true }),
-  winston.format.printf((info) => `${info.timestamp} ${info.level}: ${info.message}`),
-)
-
-// Define which transports to use
-const transports = [
-  // Console transport for all logs
-  new winston.transports.Console(),
-
-  // File transport for error logs
-  new winston.transports.File({
-    filename: path.join("logs", "error.log"),
-    level: "error",
-  }),
-
-  // File transport for all logs
-  new winston.transports.File({
-    filename: path.join("logs", "all.log"),
-  }),
-]
-
-// Create the logger instance
+// Create logger instance
 const logger = winston.createLogger({
-  level: level(),
-  levels,
-  format,
-  transports,
-})
+  level: process.env.LOG_LEVEL || 'info',
+  format: logFormat,
+  defaultMeta: { service: 'tender-management-api' },
+  transports: [
+    // Write all logs with level 'error' and below to error.log
+    new winston.transports.File({
+      filename: path.join(logsDir, 'error.log'),
+      level: 'error',
+      maxsize: 5242880, // 5MB
+      maxFiles: 5
+    }),
+    // Write all logs to combined.log
+    new winston.transports.File({
+      filename: path.join(logsDir, 'combined.log'),
+      maxsize: 5242880, // 5MB
+      maxFiles: 5
+    })
+  ]
+});
 
-module.exports = logger
+// If we're not in production, log to console as well
+if (process.env.NODE_ENV !== 'production') {
+  logger.add(new winston.transports.Console({
+    format: winston.format.combine(
+      winston.format.colorize(),
+      winston.format.simple()
+    )
+  }));
+}
+
+module.exports = logger;

@@ -1,392 +1,355 @@
-const express = require("express")
-const bcrypt = require("bcryptjs")
-const jwt = require("jsonwebtoken")
-const crypto = require("crypto")
-const { query, transaction } = require("../config/database")
-const { validate, userSchemas } = require("../middleware/validation")
-const { authenticateToken } = require("../middleware/auth")
-const { sendWelcomeEmail, sendPasswordResetEmail } = require("../services/emailService")
-const logger = require("../utils/logger")
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { query, transaction } = require('../config/database');
+const { validate, schemas } = require('../middleware/validation');
+const { authenticateToken } = require('../middleware/auth');
+const emailService = require('../services/emailService');
+const logger = require('../utils/logger');
 
-const router = express.Router()
+const router = express.Router();
 
-// Register new user
-router.post("/register", validate(userSchemas.register), async (req, res) => {
+// Generate JWT token
+const generateToken = (userId) => {
+  return jwt.sign({ userId }, process.env.JWT_SECRET, {
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+  });
+};
+
+// @route   POST /api/auth/register
+// @desc    Register a new user
+// @access  Public
+router.post('/register', validate(schemas.userRegistration), async (req, res, next) => {
   try {
-    const { firstName, lastName, email, password, role, companyName, phone } = req.body
+    const {
+      email,
+      password,
+      first_name,
+      last_name,
+      role,
+      company_name,
+      phone,
+      address
+    } = req.body;
 
     // Check if user already exists
-    const existingUser = await query("SELECT id FROM users WHERE email = $1", [email])
+    const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
+    
     if (existingUser.rows.length > 0) {
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
-        message: "User with this email already exists",
-      })
+        message: 'User with this email already exists'
+      });
     }
 
     // Hash password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(password, saltRounds)
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user
     const result = await query(
-      `INSERT INTO users (firstName, lastName, email, password, role, companyName, phone)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, firstName, lastName, email, role, companyName, phone, createdAt`,
-      [firstName, lastName, email, hashedPassword, role, companyName, phone],
-    )
+      `INSERT INTO users (email, password_hash, first_name, last_name, role, company_name, phone, address)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, email, first_name, last_name, role, company_name, created_at`,
+      [email, hashedPassword, first_name, last_name, role, company_name, phone, address]
+    );
 
-    const user = result.rows[0]
+    const user = result.rows[0];
 
-    // Generate JWT token
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || "24h",
-    })
+    // Generate token
+    const token = generateToken(user.id);
 
     // Send welcome email (don't wait for it)
-    sendWelcomeEmail(user).catch((err) => logger.error("Failed to send welcome email:", err))
+    emailService.sendWelcomeEmail({
+      email: user.email,
+      name: `${user.first_name} ${user.last_name}`
+    }).catch(error => {
+      logger.error('Failed to send welcome email:', error);
+    });
 
-    logger.info(`New user registered: ${user.email} (${user.role})`)
+    logger.info(`New user registered: ${user.email} (${user.role})`);
 
     res.status(201).json({
       success: true,
-      message: "User registered successfully",
+      message: 'User registered successfully',
       data: {
         user: {
           id: user.id,
-          firstName: user.firstname,
-          lastName: user.lastname,
           email: user.email,
+          first_name: user.first_name,
+          last_name: user.last_name,
           role: user.role,
-          companyName: user.companyname,
-          phone: user.phone,
+          company_name: user.company_name,
+          created_at: user.created_at
         },
-        token,
-      },
-    })
+        token
+      }
+    });
   } catch (error) {
-    logger.error("Registration error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Registration failed",
-    })
+    next(error);
   }
-})
+});
 
-// Login user
-router.post("/login", validate(userSchemas.login), async (req, res) => {
+// @route   POST /api/auth/login
+// @desc    Login user
+// @access  Public
+router.post('/login', validate(schemas.userLogin), async (req, res, next) => {
   try {
-    const { email, password } = req.body
+    const { email, password } = req.body;
 
-    // Get user from database
+    // Get user with password
     const result = await query(
-      "SELECT id, firstName, lastName, email, password, role, companyName, phone, isActive FROM users WHERE email = $1",
-      [email],
-    )
+      `SELECT id, email, password_hash, first_name, last_name, role, company_name, is_active, last_login
+       FROM users WHERE email = $1`,
+      [email]
+    );
 
     if (result.rows.length === 0) {
       return res.status(401).json({
         success: false,
-        message: "Invalid credentials",
-      })
+        message: 'Invalid email or password'
+      });
     }
 
-    const user = result.rows[0]
+    const user = result.rows[0];
 
     // Check if account is active
-    if (!user.isactive) {
+    if (!user.is_active) {
       return res.status(401).json({
         success: false,
-        message: "Account is deactivated",
-      })
+        message: 'Account is deactivated. Please contact administrator.'
+      });
     }
 
     // Verify password
-    const isValidPassword = await bcrypt.compare(password, user.password)
-    if (!isValidPassword) {
+    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    
+    if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
-        message: "Invalid credentials",
-      })
+        message: 'Invalid email or password'
+      });
     }
 
     // Update last login
-    await query("UPDATE users SET lastLogin = NOW() WHERE id = $1", [user.id])
+    await query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
 
-    // Generate JWT token
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || "24h",
-    })
+    // Generate token
+    const token = generateToken(user.id);
 
-    logger.info(`User logged in: ${user.email}`)
+    logger.info(`User logged in: ${user.email}`);
 
     res.json({
       success: true,
-      message: "Login successful",
+      message: 'Login successful',
       data: {
         user: {
           id: user.id,
-          firstName: user.firstname,
-          lastName: user.lastname,
           email: user.email,
+          first_name: user.first_name,
+          last_name: user.last_name,
           role: user.role,
-          companyName: user.companyname,
-          phone: user.phone,
+          company_name: user.company_name,
+          last_login: user.last_login
         },
-        token,
-      },
-    })
+        token
+      }
+    });
   } catch (error) {
-    logger.error("Login error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Login failed",
-    })
+    next(error);
   }
-})
+});
 
-// Get current user profile
-router.get("/profile", authenticateToken, async (req, res) => {
+// @route   POST /api/auth/forgot-password
+// @desc    Request password reset
+// @access  Public
+router.post('/forgot-password', validate(schemas.passwordResetRequest), async (req, res, next) => {
   try {
-    const result = await query(
-      "SELECT id, firstName, lastName, email, role, companyName, phone, createdAt, lastLogin FROM users WHERE id = $1",
-      [req.user.id],
-    )
-
-    const user = result.rows[0]
-
-    res.json({
-      success: true,
-      data: {
-        user: {
-          id: user.id,
-          firstName: user.firstname,
-          lastName: user.lastname,
-          email: user.email,
-          role: user.role,
-          companyName: user.companyname,
-          phone: user.phone,
-          createdAt: user.createdat,
-          lastLogin: user.lastlogin,
-        },
-      },
-    })
-  } catch (error) {
-    logger.error("Get profile error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Failed to get profile",
-    })
-  }
-})
-
-// Update user profile
-router.put("/profile", authenticateToken, validate(userSchemas.updateProfile), async (req, res) => {
-  try {
-    const { firstName, lastName, companyName, phone } = req.body
-    const userId = req.user.id
-
-    const result = await query(
-      `UPDATE users 
-       SET firstName = COALESCE($1, firstName),
-           lastName = COALESCE($2, lastName),
-           companyName = COALESCE($3, companyName),
-           phone = COALESCE($4, phone),
-           updatedAt = NOW()
-       WHERE id = $5
-       RETURNING id, firstName, lastName, email, role, companyName, phone`,
-      [firstName, lastName, companyName, phone, userId],
-    )
-
-    const user = result.rows[0]
-
-    logger.info(`User profile updated: ${user.email}`)
-
-    res.json({
-      success: true,
-      message: "Profile updated successfully",
-      data: {
-        user: {
-          id: user.id,
-          firstName: user.firstname,
-          lastName: user.lastname,
-          email: user.email,
-          role: user.role,
-          companyName: user.companyname,
-          phone: user.phone,
-        },
-      },
-    })
-  } catch (error) {
-    logger.error("Update profile error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Failed to update profile",
-    })
-  }
-})
-
-// Change password
-router.put("/change-password", authenticateToken, validate(userSchemas.changePassword), async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body
-    const userId = req.user.id
-
-    // Get current password hash
-    const result = await query("SELECT password FROM users WHERE id = $1", [userId])
-    const user = result.rows[0]
-
-    // Verify current password
-    const isValidPassword = await bcrypt.compare(currentPassword, user.password)
-    if (!isValidPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "Current password is incorrect",
-      })
-    }
-
-    // Hash new password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds)
-
-    // Update password
-    await query("UPDATE users SET password = $1, updatedAt = NOW() WHERE id = $2", [hashedPassword, userId])
-
-    logger.info(`Password changed for user: ${req.user.email}`)
-
-    res.json({
-      success: true,
-      message: "Password changed successfully",
-    })
-  } catch (error) {
-    logger.error("Change password error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Failed to change password",
-    })
-  }
-})
-
-// Request password reset
-router.post("/forgot-password", async (req, res) => {
-  try {
-    const { email } = req.body
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required",
-      })
-    }
+    const { email } = req.body;
 
     // Check if user exists
-    const result = await query("SELECT id, firstName, lastName, email FROM users WHERE email = $1", [email])
+    const result = await query(
+      'SELECT id, email, first_name, last_name FROM users WHERE email = $1 AND is_active = true',
+      [email]
+    );
 
     if (result.rows.length === 0) {
       // Don't reveal if email exists or not
       return res.json({
         success: true,
-        message: "If an account with that email exists, a password reset link has been sent",
-      })
+        message: 'If the email exists, a password reset link has been sent'
+      });
     }
 
-    const user = result.rows[0]
+    const user = result.rows[0];
 
     // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString("hex")
-    const resetTokenExpiry = new Date(Date.now() + 3600000) // 1 hour
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour from now
 
     // Save reset token
-    await query("UPDATE users SET resetToken = $1, resetTokenExpiry = $2 WHERE id = $3", [
-      resetToken,
-      resetTokenExpiry,
-      user.id,
-    ])
+    await query(
+      'UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3',
+      [resetToken, resetTokenExpiry, user.id]
+    );
 
     // Send reset email
-    await sendPasswordResetEmail(user, resetToken)
+    await emailService.sendPasswordResetEmail(user, resetToken);
 
-    logger.info(`Password reset requested for: ${email}`)
+    logger.info(`Password reset requested for: ${user.email}`);
 
     res.json({
       success: true,
-      message: "If an account with that email exists, a password reset link has been sent",
-    })
+      message: 'Password reset link has been sent to your email'
+    });
   } catch (error) {
-    logger.error("Forgot password error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Failed to process password reset request",
-    })
+    next(error);
   }
-})
+});
 
-// Reset password
-router.post("/reset-password", async (req, res) => {
+// @route   POST /api/auth/reset-password
+// @desc    Reset password with token
+// @access  Public
+router.post('/reset-password', validate(schemas.passwordReset), async (req, res, next) => {
   try {
-    const { token, newPassword } = req.body
-
-    if (!token || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "Token and new password are required",
-      })
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 6 characters long",
-      })
-    }
+    const { token, password } = req.body;
 
     // Find user with valid reset token
-    const result = await query("SELECT id, email FROM users WHERE resetToken = $1 AND resetTokenExpiry > NOW()", [
-      token,
-    ])
+    const result = await query(
+      `SELECT id, email, first_name, last_name 
+       FROM users 
+       WHERE reset_token = $1 AND reset_token_expiry > NOW() AND is_active = true`,
+      [token]
+    );
 
     if (result.rows.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or expired reset token",
-      })
+        message: 'Invalid or expired reset token'
+      });
     }
 
-    const user = result.rows[0]
+    const user = result.rows[0];
 
     // Hash new password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(newPassword, saltRounds)
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Update password and clear reset token
     await query(
-      "UPDATE users SET password = $1, resetToken = NULL, resetTokenExpiry = NULL, updatedAt = NOW() WHERE id = $2",
-      [hashedPassword, user.id],
-    )
+      `UPDATE users 
+       SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL, updated_at = NOW()
+       WHERE id = $2`,
+      [hashedPassword, user.id]
+    );
 
-    logger.info(`Password reset completed for: ${user.email}`)
+    logger.info(`Password reset completed for: ${user.email}`);
 
     res.json({
       success: true,
-      message: "Password reset successfully",
-    })
+      message: 'Password has been reset successfully'
+    });
   } catch (error) {
-    logger.error("Reset password error:", error)
-    res.status(500).json({
-      success: false,
-      message: "Failed to reset password",
-    })
+    next(error);
   }
-})
+});
 
-// Logout (client-side token removal, but we can log it)
-router.post("/logout", authenticateToken, (req, res) => {
-  logger.info(`User logged out: ${req.user.email}`)
+// @route   POST /api/auth/change-password
+// @desc    Change password for authenticated user
+// @access  Private
+router.post('/change-password', authenticateToken, validate(schemas.passwordChange), async (req, res, next) => {
+  try {
+    const { current_password, new_password } = req.body;
+    const userId = req.user.id;
 
+    // Get current password hash
+    const result = await query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    const user = result.rows[0];
+
+    // Verify current password
+    const isCurrentPasswordValid = await bcrypt.compare(current_password, user.password_hash);
+    
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const hashedPassword = await bcrypt.hash(new_password, saltRounds);
+
+    // Update password
+    await query(
+      'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [hashedPassword, userId]
+    );
+
+    logger.info(`Password changed for user: ${req.user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// @route   GET /api/auth/me
+// @desc    Get current user profile
+// @access  Private
+router.get('/me', authenticateToken, async (req, res, next) => {
+  try {
+    const result = await query(
+      `SELECT id, email, first_name, last_name, role, company_name, phone, address, 
+              bio, website, linkedin, is_active, created_at, updated_at, last_login
+       FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+
+    const user = result.rows[0];
+
+    res.json({
+      success: true,
+      data: { user }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// @route   POST /api/auth/logout
+// @desc    Logout user (client-side token removal)
+// @access  Private
+router.post('/logout', authenticateToken, (req, res) => {
+  logger.info(`User logged out: ${req.user.email}`);
+  
   res.json({
     success: true,
-    message: "Logged out successfully",
-  })
-})
+    message: 'Logged out successfully'
+  });
+});
 
-module.exports = router
+// @route   POST /api/auth/verify-token
+// @desc    Verify if token is valid
+// @access  Private
+router.post('/verify-token', authenticateToken, (req, res) => {
+  res.json({
+    success: true,
+    message: 'Token is valid',
+    data: {
+      user: {
+        id: req.user.id,
+        email: req.user.email,
+        first_name: req.user.first_name,
+        last_name: req.user.last_name,
+        role: req.user.role
+      }
+    }
+  });
+});
+
+module.exports = router;

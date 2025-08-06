@@ -1,325 +1,219 @@
-const nodemailer = require("nodemailer")
-const fs = require("fs")
-const path = require("path")
-const handlebars = require("handlebars")
-const logger = require("../utils/logger")
+const nodemailer = require('nodemailer');
+const handlebars = require('handlebars');
+const fs = require('fs').promises;
+const path = require('path');
+const logger = require('../utils/logger');
 
-// Create reusable transporter object using SMTP transport
-let transporter
-
-// Initialize the email transporter
-const initTransporter = () => {
-  if (transporter) return
-
-  const smtpConfig = {
-    host: process.env.SMTP_HOST,
-    port: Number.parseInt(process.env.SMTP_PORT, 10),
-    secure: process.env.SMTP_SECURE === "true", // true for 465, false for other ports
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD,
-    },
+class EmailService {
+  constructor() {
+    this.transporter = null;
+    this.initializeTransporter();
   }
 
-  // Create the transporter
-  transporter = nodemailer.createTransport(smtpConfig)
-
-  // Verify connection configuration
-  transporter.verify((error) => {
-    if (error) {
-      logger.error("SMTP connection error:", error)
-    } else {
-      logger.info("SMTP server is ready to send emails")
-    }
-  })
-}
-
-// Load email template and compile with Handlebars
-const loadTemplate = (templateName) => {
-  try {
-    const templatePath = path.join(__dirname, "../templates/emails", `${templateName}.html`)
-    const template = fs.readFileSync(templatePath, "utf8")
-    return handlebars.compile(template)
-  } catch (error) {
-    logger.error(`Error loading email template ${templateName}:`, error)
-    throw error
-  }
-}
-
-/**
- * Send an email
- * @param {Object} options - Email options
- * @param {string} options.to - Recipient email
- * @param {string} options.subject - Email subject
- * @param {string} options.template - Template name
- * @param {Object} options.context - Template context
- * @returns {Promise} - Nodemailer info object
- */
-const sendEmail = async ({ to, subject, template, context }) => {
-  try {
-    // Initialize transporter if not already done
-    initTransporter()
-
-    // Load and compile template
-    const compiledTemplate = loadTemplate(template)
-    const html = compiledTemplate(context)
-
-    // Setup email data
-    const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_FROM_ADDRESS}>`,
-      to,
-      subject,
-      html,
-    }
-
-    // Send mail
-    const info = await transporter.sendMail(mailOptions)
-    logger.info(`Email sent: ${info.messageId}`)
-
-    // Log preview URL in development
-    if (process.env.NODE_ENV === "development") {
-      logger.info(`Email preview URL: ${nodemailer.getTestMessageUrl(info)}`)
-    }
-
-    return info
-  } catch (error) {
-    logger.error("Error sending email:", error)
-    throw error
-  }
-}
-
-/**
- * Send welcome email to new user
- * @param {Object} user - User object
- * @returns {Promise} - Nodemailer info object
- */
-const sendWelcomeEmail = async (user) => {
-  return sendEmail({
-    to: user.email,
-    subject: "Welcome to Tender Management System",
-    template: "welcome",
-    context: {
-      name: `${user.first_name} ${user.last_name}`,
-      loginUrl: `${process.env.FRONTEND_URL}/login`,
-      role: user.role,
-    },
-  })
-}
-
-/**
- * Send password reset email
- * @param {Object} user - User object
- * @param {string} token - Reset token
- * @returns {Promise} - Nodemailer info object
- */
-const sendPasswordResetEmail = async (user, token) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`
-
-  return sendEmail({
-    to: user.email,
-    subject: "Password Reset Request",
-    template: "password-reset",
-    context: {
-      name: `${user.first_name} ${user.last_name}`,
-      resetUrl,
-      expiryTime: "1 hour",
-    },
-  })
-}
-
-/**
- * Send tender invitation email
- * @param {Object} invitation - Invitation object
- * @param {Object} tender - Tender object
- * @param {Object} vendor - Vendor user object
- * @returns {Promise} - Nodemailer info object
- */
-const sendTenderInvitationEmail = async (invitation, tender, vendor) => {
-  const invitationUrl = `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`
-
-  return sendEmail({
-    to: vendor.email,
-    subject: `Invitation to Tender: ${tender.title}`,
-    template: "tender-invitation",
-    context: {
-      vendorName: `${vendor.first_name} ${vendor.last_name}`,
-      companyName: vendor.company_name,
-      tenderTitle: tender.title,
-      tenderReference: tender.reference_number,
-      invitationUrl,
-      submissionDeadline: new Date(tender.submission_deadline).toLocaleDateString(),
-      message: invitation.message || "You have been invited to submit a bid for this tender.",
-    },
-  })
-}
-
-/**
- * Send bid submission confirmation email
- * @param {Object} bid - Bid object
- * @param {Object} tender - Tender object
- * @param {Object} vendor - Vendor user object
- * @returns {Promise} - Nodemailer info object
- */
-const sendBidSubmissionEmail = async (bid, tender, vendor) => {
-  return sendEmail({
-    to: vendor.email,
-    subject: `Bid Submission Confirmation: ${tender.title}`,
-    template: "bid-submission",
-    context: {
-      vendorName: `${vendor.first_name} ${vendor.last_name}`,
-      companyName: vendor.company_name,
-      tenderTitle: tender.title,
-      tenderReference: tender.reference_number,
-      bidAmount: bid.amount,
-      bidId: bid.id,
-      submissionDate: new Date(bid.created_at).toLocaleDateString(),
-      bidUrl: `${process.env.FRONTEND_URL}/vendor/bids/${bid.id}`,
-    },
-  })
-}
-
-/**
- * Send tender award notification email
- * @param {Object} tender - Tender object
- * @param {Object} bid - Winning bid object
- * @param {Object} vendor - Vendor user object
- * @returns {Promise} - Nodemailer info object
- */
-const sendTenderAwardEmail = async (tender, bid, vendor) => {
-  return sendEmail({
-    to: vendor.email,
-    subject: `Tender Award Notification: ${tender.title}`,
-    template: "tender-award",
-    context: {
-      vendorName: `${vendor.first_name} ${vendor.last_name}`,
-      companyName: vendor.company_name,
-      tenderTitle: tender.title,
-      tenderReference: tender.reference_number,
-      bidAmount: bid.amount,
-      awardDate: new Date().toLocaleDateString(),
-      tenderUrl: `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`,
-      message: tender.award_message || "Congratulations! Your bid has been selected.",
-    },
-  })
-}
-
-/**
- * Send tender rejection notification email
- * @param {Object} tender - Tender object
- * @param {Object} bid - Rejected bid object
- * @param {Object} vendor - Vendor user object
- * @returns {Promise} - Nodemailer info object
- */
-const sendBidRejectionEmail = async (tender, bid, vendor) => {
-  return sendEmail({
-    to: vendor.email,
-    subject: `Bid Status Update: ${tender.title}`,
-    template: "bid-rejection",
-    context: {
-      vendorName: `${vendor.first_name} ${vendor.last_name}`,
-      companyName: vendor.company_name,
-      tenderTitle: tender.title,
-      tenderReference: tender.reference_number,
-      bidAmount: bid.amount,
-      rejectionDate: new Date().toLocaleDateString(),
-      tenderUrl: `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`,
-      message: bid.rejection_reason || "Thank you for your submission. Unfortunately, your bid was not selected.",
-    },
-  })
-}
-
-/**
- * Send tender deadline reminder email
- * @param {Object} tender - Tender object
- * @param {Object} vendor - Vendor user object
- * @returns {Promise} - Nodemailer info object
- */
-const sendTenderDeadlineReminderEmail = async (tender, vendor) => {
-  const daysRemaining = Math.ceil((new Date(tender.submission_deadline) - new Date()) / (1000 * 60 * 60 * 24))
-
-  return sendEmail({
-    to: vendor.email,
-    subject: `Reminder: Tender Submission Deadline Approaching - ${tender.title}`,
-    template: "deadline-reminder",
-    context: {
-      vendorName: `${vendor.first_name} ${vendor.last_name}`,
-      companyName: vendor.company_name,
-      tenderTitle: tender.title,
-      tenderReference: tender.reference_number,
-      daysRemaining,
-      submissionDeadline: new Date(tender.submission_deadline).toLocaleDateString(),
-      tenderUrl: `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`,
-    },
-  })
-}
-
-/**
- * Send bulk notifications
- * @param {Array} notifications - Array of notification objects
- * @returns {Promise} - Array of results
- */
-const sendBulkNotifications = async (notifications) => {
-  try {
-    // Initialize transporter if not already done
-    initTransporter()
-
-    const promises = notifications.map(async (notification) => {
-      try {
-        // Load and compile template
-        const compiledTemplate = loadTemplate(notification.template || "notification")
-        const html = compiledTemplate(notification.context || {})
-
-        // Setup email data
-        const mailOptions = {
-          from: `"${process.env.EMAIL_FROM_NAME}" <${process.env.EMAIL_FROM_ADDRESS}>`,
-          to: notification.to,
-          subject: notification.subject,
-          html,
-        }
-
-        // Send mail
-        return await transporter.sendMail(mailOptions)
-      } catch (error) {
-        logger.error(`Error sending notification to ${notification.to}:`, error)
-        return { error, to: notification.to }
+  async initializeTransporter() {
+    try {
+      // Create transporter based on environment
+      if (process.env.NODE_ENV === 'production') {
+        this.transporter = nodemailer.createTransporter({
+          host: process.env.SMTP_HOST,
+          port: parseInt(process.env.SMTP_PORT) || 587,
+          secure: process.env.SMTP_SECURE === 'true',
+          auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASSWORD
+          }
+        });
+      } else {
+        // Use Ethereal for development
+        const testAccount = await nodemailer.createTestAccount();
+        this.transporter = nodemailer.createTransporter({
+          host: 'smtp.ethereal.email',
+          port: 587,
+          secure: false,
+          auth: {
+            user: testAccount.user,
+            pass: testAccount.pass
+          }
+        });
       }
-    })
 
-    return Promise.all(promises)
-  } catch (error) {
-    logger.error("Error sending bulk notifications:", error)
-    throw error
+      // Verify connection
+      await this.transporter.verify();
+      logger.info('Email service initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize email service:', error);
+      throw error;
+    }
+  }
+
+  async loadTemplate(templateName, data) {
+    try {
+      const templatePath = path.join(__dirname, '..', 'templates', `${templateName}.hbs`);
+      const templateContent = await fs.readFile(templatePath, 'utf8');
+      const template = handlebars.compile(templateContent);
+      return template(data);
+    } catch (error) {
+      logger.error(`Failed to load email template ${templateName}:`, error);
+      // Return a basic template if file doesn't exist
+      return this.getBasicTemplate(templateName, data);
+    }
+  }
+
+  getBasicTemplate(templateName, data) {
+    const templates = {
+      welcome: `
+        <h2>Welcome to Tender Management System</h2>
+        <p>Hello ${data.name},</p>
+        <p>Welcome to our tender management platform. Your account has been created successfully.</p>
+        <p>You can now log in and start managing tenders.</p>
+        <p>Best regards,<br>Tender Management Team</p>
+      `,
+      passwordReset: `
+        <h2>Password Reset Request</h2>
+        <p>Hello ${data.name},</p>
+        <p>You requested a password reset. Click the link below to reset your password:</p>
+        <p><a href="${data.resetLink}">Reset Password</a></p>
+        <p>This link will expire in 1 hour.</p>
+        <p>If you didn't request this, please ignore this email.</p>
+        <p>Best regards,<br>Tender Management Team</p>
+      `,
+      tenderInvitation: `
+        <h2>Tender Invitation</h2>
+        <p>Hello ${data.vendorName},</p>
+        <p>You have been invited to participate in a tender:</p>
+        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
+        <p><strong>Deadline:</strong> ${data.deadline}</p>
+        <p><strong>Description:</strong> ${data.description}</p>
+        <p><a href="${data.tenderLink}">View Tender Details</a></p>
+        <p>Best regards,<br>Tender Management Team</p>
+      `,
+      bidSubmitted: `
+        <h2>Bid Submitted Successfully</h2>
+        <p>Hello ${data.vendorName},</p>
+        <p>Your bid has been submitted successfully for:</p>
+        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
+        <p><strong>Bid Amount:</strong> $${data.bidAmount}</p>
+        <p><strong>Submitted At:</strong> ${data.submittedAt}</p>
+        <p>You will be notified once the evaluation is complete.</p>
+        <p>Best regards,<br>Tender Management Team</p>
+      `,
+      tenderAwarded: `
+        <h2>Congratulations! Tender Awarded</h2>
+        <p>Hello ${data.vendorName},</p>
+        <p>Congratulations! Your bid has been selected for:</p>
+        <p><strong>Tender:</strong> ${data.tenderTitle}</p>
+        <p><strong>Winning Bid:</strong> $${data.bidAmount}</p>
+        <p>We will contact you soon with further details.</p>
+        <p>Best regards,<br>Tender Management Team</p>
+      `
+    };
+    return templates[templateName] || `<p>Email content for ${templateName}</p>`;
+  }
+
+  async sendEmail(to, subject, templateName, data) {
+    try {
+      const html = await this.loadTemplate(templateName, data);
+      
+      const mailOptions = {
+        from: process.env.SMTP_USER || 'noreply@tendermanagement.com',
+        to,
+        subject,
+        html
+      };
+
+      const info = await this.transporter.sendMail(mailOptions);
+      
+      if (process.env.NODE_ENV !== 'production') {
+        logger.info('Preview URL: ' + nodemailer.getTestMessageUrl(info));
+      }
+      
+      logger.info(`Email sent successfully to ${to}`);
+      return info;
+    } catch (error) {
+      logger.error(`Failed to send email to ${to}:`, error);
+      throw error;
+    }
+  }
+
+  async sendWelcomeEmail(user) {
+    return this.sendEmail(
+      user.email,
+      'Welcome to Tender Management System',
+      'welcome',
+      { name: user.name }
+    );
+  }
+
+  async sendPasswordResetEmail(user, resetToken) {
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    return this.sendEmail(
+      user.email,
+      'Password Reset Request',
+      'passwordReset',
+      { name: user.name, resetLink }
+    );
+  }
+
+  async sendTenderInvitationEmail(vendor, tender) {
+    const tenderLink = `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`;
+    return this.sendEmail(
+      vendor.email,
+      `Tender Invitation: ${tender.title}`,
+      'tenderInvitation',
+      {
+        vendorName: vendor.name,
+        tenderTitle: tender.title,
+        deadline: new Date(tender.deadline).toLocaleDateString(),
+        description: tender.description,
+        tenderLink
+      }
+    );
+  }
+
+  async sendBidSubmittedEmail(vendor, tender, bid) {
+    return this.sendEmail(
+      vendor.email,
+      `Bid Submitted: ${tender.title}`,
+      'bidSubmitted',
+      {
+        vendorName: vendor.name,
+        tenderTitle: tender.title,
+        bidAmount: bid.amount,
+        submittedAt: new Date(bid.created_at).toLocaleString()
+      }
+    );
+  }
+
+  async sendTenderAwardedEmail(vendor, tender, bid) {
+    return this.sendEmail(
+      vendor.email,
+      `Tender Awarded: ${tender.title}`,
+      'tenderAwarded',
+      {
+        vendorName: vendor.name,
+        tenderTitle: tender.title,
+        bidAmount: bid.amount
+      }
+    );
+  }
+
+  async sendBulkEmails(emails) {
+    const results = [];
+    for (const emailData of emails) {
+      try {
+        const result = await this.sendEmail(
+          emailData.to,
+          emailData.subject,
+          emailData.template,
+          emailData.data
+        );
+        results.push({ success: true, email: emailData.to, result });
+      } catch (error) {
+        results.push({ success: false, email: emailData.to, error: error.message });
+      }
+    }
+    return results;
   }
 }
 
-/**
- * Send system notification email
- * @param {Object} options - Email options
- * @returns {Promise} - Nodemailer info object
- */
-const sendSystemNotificationEmail = async (options) => {
-  return sendEmail({
-    to: options.to,
-    subject: options.subject,
-    template: "system-notification",
-    context: {
-      name: options.name,
-      message: options.message,
-      actionUrl: options.actionUrl,
-      actionText: options.actionText || "View Details",
-    },
-  })
-}
-
-module.exports = {
-  sendEmail,
-  sendWelcomeEmail,
-  sendPasswordResetEmail,
-  sendTenderInvitationEmail,
-  sendBidSubmissionEmail,
-  sendTenderAwardEmail,
-  sendBidRejectionEmail,
-  sendTenderDeadlineReminderEmail,
-  sendBulkNotifications,
-  sendSystemNotificationEmail,
-}
+module.exports = new EmailService();

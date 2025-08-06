@@ -1,77 +1,76 @@
-const { Pool } = require("pg")
-const logger = require("../utils/logger")
+const { Pool } = require('pg');
+const logger = require('../utils/logger');
 
-// Create a new Pool instance with connection details from environment variables
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT,
-  // Maximum number of clients the pool should contain
-  max: 20,
-  // Maximum time in ms that a client can be idle before being closed
-  idleTimeoutMillis: 30000,
-  // Maximum time in ms that a client can take to connect before timing out
-  connectionTimeoutMillis: 2000,
-})
+// Database configuration
+const dbConfig = {
+  user: process.env.DB_USER || 'postgres',
+  host: process.env.DB_HOST || 'localhost',
+  database: process.env.DB_NAME || 'tender_management',
+  password: process.env.DB_PASSWORD || 'password',
+  port: parseInt(process.env.DB_PORT) || 5432,
+  max: 20, // Maximum number of clients in the pool
+  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+};
 
-// Log pool errors
-pool.on("error", (err) => {
-  logger.error("Unexpected error on idle client", err)
-  process.exit(-1)
-})
+// Create connection pool
+const pool = new Pool(dbConfig);
 
-// Simple query method
+// Handle pool errors
+pool.on('error', (err) => {
+  logger.error('Unexpected error on idle client', err);
+  process.exit(-1);
+});
+
+// Test database connection
+pool.connect((err, client, release) => {
+  if (err) {
+    logger.error('Error acquiring client', err.stack);
+    return;
+  }
+  logger.info('Database connected successfully');
+  release();
+});
+
+// Helper function to execute queries
 const query = async (text, params) => {
-  const start = Date.now()
+  const start = Date.now();
   try {
-    const res = await pool.query(text, params)
-    const duration = Date.now() - start
-
-    // Log slow queries (over 100ms)
-    if (duration > 100) {
-      logger.warn(`Slow query: ${duration}ms\n${text}`)
-    }
-
-    return res
-  } catch (err) {
-    logger.error(`Query error: ${err.message}\nQuery: ${text}\nParams: ${JSON.stringify(params)}`)
-    throw err
+    const res = await pool.query(text, params);
+    const duration = Date.now() - start;
+    logger.debug('Executed query', { text, duration, rows: res.rowCount });
+    return res;
+  } catch (error) {
+    logger.error('Database query error', { text, error: error.message });
+    throw error;
   }
-}
+};
 
-// Transaction helper
+// Helper function for transactions
 const transaction = async (callback) => {
-  const client = await pool.connect()
+  const client = await pool.connect();
   try {
-    await client.query("BEGIN")
-    const result = await callback(client)
-    await client.query("COMMIT")
-    return result
-  } catch (e) {
-    await client.query("ROLLBACK")
-    throw e
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
   } finally {
-    client.release()
+    client.release();
   }
-}
+};
 
-// Connect to the database and test the connection
-const connectDB = async () => {
-  try {
-    const res = await pool.query("SELECT NOW()")
-    logger.info(`Connected to PostgreSQL database at ${process.env.DB_HOST}:${process.env.DB_PORT}`)
-    return res
-  } catch (err) {
-    logger.error("Database connection error:", err)
-    process.exit(1)
-  }
-}
+// Helper function to get a client from the pool
+const getClient = async () => {
+  return await pool.connect();
+};
 
 module.exports = {
+  pool,
   query,
   transaction,
-  connectDB,
-  pool,
-}
+  getClient
+};

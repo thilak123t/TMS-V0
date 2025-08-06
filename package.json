@@ -1,11 +1,16 @@
 {
-  "name": "my-v0-project",
-  "version": "0.1.0",
+  "name": "tender-management-system",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
+    "backend:dev": "nodemon server.js",
+    "backend:start": "node server.js",
     "build": "next build",
     "dev": "next dev",
     "lint": "next lint",
+    "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "setup-db": "npm run migrate && npm run seed",
     "start": "next start"
   },
   "dependencies": {
@@ -49,6 +54,8 @@
     "dotenv": "latest",
     "embla-carousel-react": "8.5.1",
     "express": "latest",
+    "express-rate-limit": "latest",
+    "express-validator": "^7.0.1",
     "fs": "latest",
     "geist": "latest",
     "handlebars": "latest",
@@ -87,9 +94,14 @@
     "@types/node": "^22",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "nodemon": "^3.0.2",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
   }
 }
