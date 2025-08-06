@@ -72,5 +72,5 @@ module.exports = {
   pool,
   query,
   transaction,
-  getClient
+  getClient,
 };

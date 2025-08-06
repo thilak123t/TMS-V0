@@ -131,29 +131,29 @@ class EmailService {
     );
   }
 
-  async sendTenderInvitationEmail(vendor, tender) {
+  async sendTenderInvitationEmail(vendor, tender, inviter) {
     const tenderLink = `${process.env.FRONTEND_URL}/vendor/tenders/${tender.id}`;
     return this.sendEmail(
       vendor.email,
       `Tender Invitation: ${tender.title}`,
       'tenderInvitation',
       {
-        vendorName: vendor.name,
+        vendorName: `${vendor.first_name} ${vendor.last_name}`,
         tenderTitle: tender.title,
         tenderDescription: tender.description,
-        deadline: new Date(tender.deadline).toLocaleDateString(),
+        deadline: new Date(tender.submission_deadline).toLocaleDateString(),
         tenderLink
       }
     );
   }
 
-  async sendBidSubmittedEmail(vendor, tender, bid) {
+  async sendBidSubmissionEmail(bid, tender, vendor) {
     return this.sendEmail(
       vendor.email,
       `Bid Submitted: ${tender.title}`,
       'bidSubmitted',
       {
-        vendorName: vendor.name,
+        vendorName: `${vendor.first_name} ${vendor.last_name}`,
         tenderTitle: tender.title,
         bidAmount: bid.amount,
         submittedAt: new Date(bid.created_at).toLocaleString()
@@ -161,17 +161,31 @@ class EmailService {
     );
   }
 
-  async sendTenderAwardedEmail(vendor, tender, bid) {
-    return this.sendEmail(
-      vendor.email,
-      `Tender Awarded: ${tender.title}`,
+  async sendTenderAwardEmail(bid, winner, otherVendors) {
+    // Send congratulations email to winner
+    await this.sendEmail(
+      winner.email,
+      `Tender Awarded: ${bid.title}`,
       'tenderAwarded',
       {
-        vendorName: vendor.name,
-        tenderTitle: tender.title,
+        vendorName: `${winner.first_name} ${winner.last_name}`,
+        tenderTitle: bid.title,
         bidAmount: bid.amount
       }
     );
+
+    // Send notification emails to other vendors
+    for (const vendor of otherVendors) {
+      await this.sendEmail(
+        vendor.email,
+        `Tender Update: ${bid.title}`,
+        'bidRejected',
+        {
+          vendorName: `${vendor.first_name} ${vendor.last_name}`,
+          tenderTitle: bid.title
+        }
+      );
+    }
   }
 }
 

@@ -117,8 +117,36 @@ const authorizeOwnerOrAdmin = (userIdField = 'user_id') => {
   };
 };
 
+// Optional authentication - doesn't fail if no token
+const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return next();
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userResult = await query(
+      'SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = $1',
+      [decoded.userId]
+    );
+
+    if (userResult.rows.length > 0 && userResult.rows[0].is_active) {
+      req.user = userResult.rows[0];
+    }
+
+    next();
+  } catch (error) {
+    // Ignore token errors for optional auth
+    next();
+  }
+};
+
 module.exports = {
   authenticateToken,
   authorizeRoles,
-  authorizeOwnerOrAdmin
+  authorizeOwnerOrAdmin,
+  optionalAuth
 };

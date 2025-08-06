@@ -1,354 +1,519 @@
-const express = require("express")
-const bcrypt = require('bcryptjs')
-const { query, transaction } = require("../config/database")
-const { authenticateToken, authorizeRoles, authorizeOwnerOrAdmin } = require("../middleware/auth")
-const { validate, userSchemas } = require("../middleware/validation")
-const logger = require("../utils/logger")
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const { Pool } = require('pg');
+const auth = require('../middleware/auth');
+const logger = require('../utils/logger');
 
-const router = express.Router()
+const router = express.Router();
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+});
 
-// Get all users (admin only)
-router.get("/", authenticateToken, authorizeRoles("admin"), async (req, res, next) => {
+// @desc    Get all users (admin only)
+// @route   GET /api/users
+// @access  Private/Admin
+router.get('/', auth, async (req, res) => {
   try {
-    const { page = 1, limit = 10, role, search, status } = req.query
-    const offset = (page - 1) * limit
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
 
-    let whereClause = 'WHERE 1=1'
-    const queryParams = []
-    let paramCount = 0
+    const {
+      page = 1,
+      limit = 10,
+      role,
+      search,
+      sortBy = 'created_at',
+      sortOrder = 'DESC'
+    } = req.query;
+
+    const offset = (page - 1) * limit;
+    let query = `
+      SELECT id, email, first_name, last_name, role, company_name, phone, address, is_active, created_at, last_login
+      FROM users
+      WHERE 1=1
+    `;
+    const queryParams = [];
+    let paramCount = 0;
 
     // Add filters
     if (role) {
-      paramCount++
-      whereClause += ` AND role = $${paramCount}`
-      queryParams.push(role)
-    }
-
-    if (status) {
-      paramCount++
-      whereClause += ` AND is_active = $${paramCount}`
-      queryParams.push(status === 'active')
+      paramCount++;
+      query += ` AND role = $${paramCount}`;
+      queryParams.push(role);
     }
 
     if (search) {
-      paramCount++
-      whereClause += ` AND (first_name ILIKE $${paramCount} OR last_name ILIKE $${paramCount} OR email ILIKE $${paramCount} OR company_name ILIKE $${paramCount})`
-      queryParams.push(`%${search}%`)
+      paramCount++;
+      query += ` AND (first_name ILIKE $${paramCount} OR last_name ILIKE $${paramCount} OR email ILIKE $${paramCount} OR company_name ILIKE $${paramCount})`;
+      queryParams.push(`%${search}%`);
     }
 
-    // Get total count
-    const countResult = await query(
-      `SELECT COUNT(*) FROM users ${whereClause}`,
-      queryParams
-    )
-    const totalUsers = parseInt(countResult.rows[0].count)
+    query += ` ORDER BY ${sortBy} ${sortOrder}`;
+    
+    paramCount++;
+    query += ` LIMIT $${paramCount}`;
+    queryParams.push(limit);
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    queryParams.push(offset);
 
-    // Get users
-    paramCount++
-    queryParams.push(limit)
-    paramCount++
-    queryParams.push(offset)
+    const result = await pool.query(query, queryParams);
 
-    const result = await query(
-      `SELECT id, email, first_name, last_name, role, company_name, phone, bio, is_active, created_at, last_login
-       FROM users ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT $${paramCount - 1} OFFSET $${paramCount}`,
-      queryParams
-    )
+    // Get total count for pagination
+    let countQuery = `SELECT COUNT(*) as total FROM users WHERE 1=1`;
+    const countParams = [];
+    let countParamCount = 0;
 
-    const totalPages = Math.ceil(totalUsers / limit)
+    if (role) {
+      countParamCount++;
+      countQuery += ` AND role = $${countParamCount}`;
+      countParams.push(role);
+    }
+
+    if (search) {
+      countParamCount++;
+      countQuery += ` AND (first_name ILIKE $${countParamCount} OR last_name ILIKE $${countParamCount} OR email ILIKE $${countParamCount} OR company_name ILIKE $${countParamCount})`;
+      countParams.push(`%${search}%`);
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const total = parseInt(countResult.rows[0].total);
+
+    res.json({
+      success: true,
+      data: result.rows,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    logger.error('Get users error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Get users by role
+// @route   GET /api/users/role/:role
+// @access  Private/Admin
+router.get('/role/:role', auth, async (req, res) => {
+  try {
+    const { role } = req.params;
+    const validRoles = ['admin', 'tender-creator', 'vendor'];
+
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid role specified'
+      });
+    }
+
+    const result = await pool.query(
+      `SELECT id, email, first_name, last_name, role, company_name, phone, is_active, created_at
+       FROM users
+       WHERE role = $1 AND is_active = true
+       ORDER BY created_at DESC`,
+      [role]
+    );
 
     res.json({
       success: true,
       data: {
         users: result.rows,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages,
-          totalUsers,
-          hasNextPage: page < totalPages,
-          hasPrevPage: page > 1
-        }
+        count: result.rows.length
       }
-    })
+    });
   } catch (error) {
-    next(error)
+    logger.error('Get users by role error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
   }
-})
+});
 
-// Get user statistics (admin only)
-router.get('/stats', authenticateToken, authorizeRoles('admin'), async (req, res, next) => {
+// @desc    Get user by ID
+// @route   GET /api/users/:id
+// @access  Private (own profile or admin)
+router.get('/:id', auth, async (req, res) => {
   try {
-    const stats = await query(`
-      SELECT 
-        COUNT(*) as total_users,
-        COUNT(*) FILTER (WHERE role = 'admin') as admin_count,
-        COUNT(*) FILTER (WHERE role = 'tender-creator') as tender_creator_count,
-        COUNT(*) FILTER (WHERE role = 'vendor') as vendor_count,
-        COUNT(*) FILTER (WHERE is_active = true) as active_users,
-        COUNT(*) FILTER (WHERE is_active = false) as inactive_users,
-        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days') as new_users_last_30_days
-      FROM users
-    `)
+    const { id } = req.params;
 
-    res.json({
-      success: true,
-      data: { stats: stats.rows[0] }
-    })
-  } catch (error) {
-    next(error)
-  }
-})
-
-// Get single user by ID
-router.get("/:id", authenticateToken, async (req, res, next) => {
-  try {
-    const { id } = req.params
-
-    // Check if user can access this profile
-    if (req.user.role !== "admin" && req.user.id.toString() !== id) {
+    // Users can only view their own profile unless they're admin
+    if (req.user.role !== 'admin' && req.user.id !== parseInt(id)) {
       return res.status(403).json({
         success: false,
-        message: "Access denied"
-      })
+        error: 'Access denied'
+      });
     }
 
-    const result = await query(
-      'SELECT id, email, first_name, last_name, role, company_name, phone, bio, is_active, created_at, last_login FROM users WHERE id = $1',
+    const result = await pool.query(
+      'SELECT id, email, first_name, last_name, role, company_name, phone, address, is_active, created_at, last_login FROM users WHERE id = $1',
       [id]
-    )
+    );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
-      })
+        error: 'User not found'
+      });
     }
 
     res.json({
       success: true,
-      data: { user: result.rows[0] }
-    })
+      data: result.rows[0]
+    });
   } catch (error) {
-    next(error)
+    logger.error('Get user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
   }
-})
+});
 
-// Update user profile
-router.put("/:id", authenticateToken, validate(userSchemas.updateProfile), async (req, res, next) => {
+// @desc    Update user profile
+// @route   PUT /api/users/:id
+// @access  Private (own profile or admin)
+router.put('/:id', auth, async (req, res) => {
   try {
-    const { id } = req.params
-    const { first_name, last_name, company_name, phone, bio } = req.body
+    const { id } = req.params;
+    const { first_name, last_name, company_name, phone, address } = req.body;
 
-    // Check if user can update this profile
-    if (req.user.role !== "admin" && req.user.id.toString() !== id) {
+    // Users can only update their own profile unless they're admin
+    if (req.user.role !== 'admin' && req.user.id !== parseInt(id)) {
       return res.status(403).json({
         success: false,
-        message: "Access denied"
-      })
+        error: 'Access denied'
+      });
     }
 
     // Check if user exists
-    const userExists = await query('SELECT id FROM users WHERE id = $1', [id])
+    const userExists = await pool.query('SELECT id FROM users WHERE id = $1', [id]);
     if (userExists.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
-      })
+        error: 'User not found'
+      });
     }
 
-    // Build update query dynamically
-    const updates = []
-    const values = []
-    let paramCount = 0
+    const result = await pool.query(`
+      UPDATE users 
+      SET first_name = COALESCE($1, first_name),
+          last_name = COALESCE($2, last_name),
+          company_name = COALESCE($3, company_name),
+          phone = COALESCE($4, phone),
+          address = COALESCE($5, address),
+          updated_at = NOW()
+      WHERE id = $6
+      RETURNING id, email, first_name, last_name, role, company_name, phone, address, is_active, created_at
+    `, [first_name, last_name, company_name, phone, address, id]);
 
-    if (first_name !== undefined) {
-      paramCount++
-      updates.push(`first_name = $${paramCount}`)
-      values.push(first_name)
-    }
-
-    if (last_name !== undefined) {
-      paramCount++
-      updates.push(`last_name = $${paramCount}`)
-      values.push(last_name)
-    }
-
-    if (company_name !== undefined) {
-      paramCount++
-      updates.push(`company_name = $${paramCount}`)
-      values.push(company_name)
-    }
-
-    if (phone !== undefined) {
-      paramCount++
-      updates.push(`phone = $${paramCount}`)
-      values.push(phone)
-    }
-
-    if (bio !== undefined) {
-      paramCount++
-      updates.push(`bio = $${paramCount}`)
-      values.push(bio)
-    }
-
-    if (updates.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No valid fields to update"
-      })
-    }
-
-    paramCount++
-    updates.push(`updated_at = NOW()`)
-    values.push(id)
-
-    const result = await query(
-      `UPDATE users SET ${updates.join(", ")} WHERE id = $${paramCount}
-       RETURNING id, email, first_name, last_name, role, company_name, phone, bio, is_active, updated_at`,
-      values
-    )
-
-    logger.info('User profile updated:', { userId: id, updatedBy: req.user.id })
+    logger.info(`User profile updated: ${id} by user ${req.user.id}`);
 
     res.json({
       success: true,
-      message: "Profile updated successfully",
-      data: { user: result.rows[0] }
-    })
+      data: result.rows[0]
+    });
   } catch (error) {
-    next(error)
+    logger.error('Update user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
   }
-})
+});
 
-// Update user status (activate/deactivate)
-router.put("/:id/status", authenticateToken, authorizeRoles("admin"), async (req, res, next) => {
+// @desc    Change user password
+// @route   PUT /api/users/:id/password
+// @access  Private
+router.put('/:id/password', auth, async (req, res) => {
   try {
-    const { id } = req.params
-    const { is_active } = req.body
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
 
-    if (typeof is_active !== "boolean") {
-      return res.status(400).json({
+    // Users can only change their own password unless they're admin
+    if (req.user.role !== 'admin' && req.user.id !== parseInt(id)) {
+      return res.status(403).json({
         success: false,
-        message: "is_active must be a boolean value"
-      })
+        error: 'Access denied'
+      });
     }
 
-    // Prevent admin from deactivating themselves
-    if (req.user.id.toString() === id && !is_active) {
+    // Validate new password
+    if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({
         success: false,
-        message: "You cannot deactivate your own account"
-      })
+        error: 'New password must be at least 6 characters'
+      });
     }
 
-    const result = await query(
-      'UPDATE users SET is_active = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, first_name, last_name, is_active',
-      [is_active, id]
-    )
+    // Get current user
+    const userResult = await pool.query('SELECT password FROM users WHERE id = $1', [id]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    // If not admin, verify current password
+    if (req.user.role !== 'admin') {
+      const isMatch = await bcrypt.compare(currentPassword, userResult.rows[0].password);
+      if (!isMatch) {
+        return res.status(400).json({
+          success: false,
+          error: 'Current password is incorrect'
+        });
+      }
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(parseInt(process.env.BCRYPT_ROUNDS) || 12);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    await pool.query('UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2', [hashedPassword, id]);
+
+    logger.info(`Password changed for user: ${id} by user ${req.user.id}`);
+
+    res.json({
+      success: true,
+      message: 'Password updated successfully'
+    });
+  } catch (error) {
+    logger.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Toggle user active status (Admin only)
+// @route   PUT /api/users/:id/status
+// @access  Private
+router.put('/:id/status', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_active } = req.body;
+
+    // Only admin can change user status
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Can't deactivate yourself
+    if (req.user.id === parseInt(id)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot change your own status'
+      });
+    }
+
+    const result = await pool.query(`
+      UPDATE users 
+      SET is_active = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, email, first_name, last_name, role, company_name, is_active
+    `, [is_active, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
-      })
+        error: 'User not found'
+      });
     }
 
-    logger.info('User status updated:', { userId: id, is_active, updatedBy: req.user.id })
+    logger.info(`User status changed: ${id} to ${is_active} by user ${req.user.id}`);
 
     res.json({
       success: true,
-      message: `User ${is_active ? 'activated' : 'deactivated'} successfully`,
-      data: { user: result.rows[0] }
-    })
+      data: result.rows[0]
+    });
   } catch (error) {
-    next(error)
+    logger.error('Change user status error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
   }
-})
+});
 
-// Delete user (admin only)
-router.delete("/:id", authenticateToken, authorizeRoles("admin"), async (req, res, next) => {
+// @desc    Delete user
+// @route   DELETE /api/users/:id
+// @access  Private/Admin
+router.delete('/:id', auth, async (req, res) => {
   try {
-    const { id } = req.params
+    const { id } = req.params;
 
-    // Prevent admin from deleting themselves
-    if (req.user.id.toString() === id) {
+    // Only admin can delete users
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Can't delete yourself
+    if (req.user.id === parseInt(id)) {
       return res.status(400).json({
         success: false,
-        message: "You cannot delete your own account"
-      })
+        error: 'Cannot delete your own account'
+      });
     }
 
-    // Use transaction to handle related data
-    await transaction(async (client) => {
-      // Check if user exists
-      const userResult = await client.query('SELECT id, email FROM users WHERE id = $1', [id])
-      if (userResult.rows.length === 0) {
-        throw new Error('User not found')
-      }
+    // Check if user has associated data
+    const tenderCount = await pool.query('SELECT COUNT(*) FROM tenders WHERE created_by = $1', [id]);
+    const bidCount = await pool.query('SELECT COUNT(*) FROM bids WHERE vendor_id = $1', [id]);
 
-      const user = userResult.rows[0]
-
-      // Delete related data (bids, tenders, etc.)
-      await client.query('DELETE FROM bids WHERE user_id = $1', [id])
-      await client.query('DELETE FROM tenders WHERE created_by = $1', [id])
-      await client.query('DELETE FROM notifications WHERE user_id = $1', [id])
-
-      // Delete user
-      await client.query('DELETE FROM users WHERE id = $1', [id])
-
-      logger.info('User deleted:', { userId: id, email: user.email, deletedBy: req.user.id })
-    })
-
-    res.json({
-      success: true,
-      message: "User deleted successfully"
-    })
-  } catch (error) {
-    if (error.message === 'User not found') {
-      return res.status(404).json({
+    if (parseInt(tenderCount.rows[0].count) > 0 || parseInt(bidCount.rows[0].count) > 0) {
+      return res.status(400).json({
         success: false,
-        message: "User not found"
-      })
-    }
-    next(error)
-  }
-})
-
-// Get list of vendors for invitations
-router.get("/vendors/list", authenticateToken, authorizeRoles("admin", "tender-creator"), async (req, res, next) => {
-  try {
-    const { search, limit = 50 } = req.query
-
-    let whereClause = "WHERE role = 'vendor' AND is_active = true"
-    const queryParams = ['vendor', true]
-    let paramCount = 2
-
-    if (search) {
-      paramCount++
-      whereClause += ` AND (first_name ILIKE $${paramCount} OR last_name ILIKE $${paramCount} OR company_name ILIKE $${paramCount} OR email ILIKE $${paramCount})`
-      queryParams.push(`%${search}%`)
+        error: 'Cannot delete user with associated tenders or bids. Deactivate instead.'
+      });
     }
 
-    paramCount++
-    queryParams.push(limit)
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
 
-    const result = await query(
-      `SELECT id, email, first_name, last_name, company_name, phone
-       FROM users ${whereClause}
-       ORDER BY company_name, first_name
-       LIMIT $${paramCount}`,
-      queryParams
-    )
+    logger.info(`User deleted: ${id} by user ${req.user.id}`);
 
     res.json({
       success: true,
-      data: { vendors: result.rows }
-    })
+      message: 'User deleted successfully'
+    });
   } catch (error) {
-    next(error)
+    logger.error('Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
   }
-})
+});
 
-module.exports = router
+// @desc    Create new user (admin only)
+// @route   POST /api/users
+// @access  Private/Admin
+router.post('/', auth, async (req, res) => {
+  try {
+    const { email, password, first_name, last_name, role, company_name, phone } = req.body;
+
+    // Check if user already exists
+    const existingUser = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Hash password
+    const saltRounds = parseInt(process.env.BCRYPT_ROUNDS) || 12;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create user
+    const result = await pool.query(
+      `INSERT INTO users (email, password, first_name, last_name, role, company_name, phone, is_active, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
+       RETURNING id, email, first_name, last_name, role, company_name, phone, is_active, created_at`,
+      [email, hashedPassword, first_name, last_name, role, company_name, phone]
+    );
+
+    const user = result.rows[0];
+
+    logger.info(`New user created by admin: ${user.email} (${user.role})`);
+
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      data: {
+        user: user
+      }
+    });
+  } catch (error) {
+    logger.error('Create user error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+// @desc    Get user statistics (admin only)
+// @route   GET /api/users/stats/overview
+// @access  Private/Admin
+router.get('/stats/overview', auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
+
+    // Get user counts by role
+    const roleStats = await pool.query(`
+      SELECT 
+        role,
+        COUNT(*) as count,
+        COUNT(CASE WHEN is_active = true THEN 1 END) as active_count
+      FROM users 
+      GROUP BY role
+    `);
+
+    // Get recent registrations (last 30 days)
+    const recentRegistrations = await pool.query(`
+      SELECT COUNT(*) as count
+      FROM users 
+      WHERE created_at >= NOW() - INTERVAL '30 days'
+    `);
+
+    // Get total users
+    const totalUsers = await pool.query('SELECT COUNT(*) as count FROM users');
+
+    // Get active users
+    const activeUsers = await pool.query('SELECT COUNT(*) as count FROM users WHERE is_active = true');
+
+    res.json({
+      success: true,
+      data: {
+        total_users: parseInt(totalUsers.rows[0].count),
+        active_users: parseInt(activeUsers.rows[0].count),
+        recent_registrations: parseInt(recentRegistrations.rows[0].count),
+        role_distribution: roleStats.rows.map(row => ({
+          role: row.role,
+          total: parseInt(row.count),
+          active: parseInt(row.active_count)
+        }))
+      }
+    });
+  } catch (error) {
+    logger.error('Get user stats error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
+    });
+  }
+});
+
+module.exports = router;

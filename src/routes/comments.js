@@ -17,7 +17,7 @@ router.get("/tender/:tenderId", authenticateToken, async (req, res) => {
   try {
     // Check if user has access to tender
     const tenderResult = await query(
-      `SELECT t.id, t.creator_id, t.status, t.category,
+      `SELECT t.id, t.created_by, t.status, t.title,
               CASE WHEN ti.vendor_id IS NOT NULL THEN true ELSE false END as is_invited
        FROM tenders t
        LEFT JOIN tender_invitations ti ON t.id = ti.tender_id AND ti.vendor_id = $2
@@ -36,7 +36,7 @@ router.get("/tender/:tenderId", authenticateToken, async (req, res) => {
       if (tender.status !== "published" && !tender.is_invited) {
         return res.status(403).json({ error: "Access denied" })
       }
-    } else if (req.user.role === "tender-creator" && tender.creator_id !== req.user.id) {
+    } else if (req.user.role === "tender-creator" && tender.created_by !== req.user.id) {
       return res.status(403).json({ error: "Access denied" })
     }
 
@@ -119,12 +119,12 @@ router.get("/tender/:tenderId", authenticateToken, async (req, res) => {
 // Create new comment
 router.post("/tender/:tenderId", authenticateToken, validate(schemas.createComment), async (req, res) => {
   const { tenderId } = req.params
-  const { message, parentId } = req.body
+  const { message, parent_id } = req.body
 
   try {
     // Check if user has access to tender
     const tenderResult = await query(
-      `SELECT t.id, t.title, t.creator_id, t.status, t.category,
+      `SELECT t.id, t.title, t.created_by, t.status,
               CASE WHEN ti.vendor_id IS NOT NULL THEN true ELSE false END as is_invited
        FROM tenders t
        LEFT JOIN tender_invitations ti ON t.id = ti.tender_id AND ti.vendor_id = $2
@@ -143,13 +143,13 @@ router.post("/tender/:tenderId", authenticateToken, validate(schemas.createComme
       if (tender.status !== "published" && !tender.is_invited) {
         return res.status(403).json({ error: "Access denied" })
       }
-    } else if (req.user.role === "tender-creator" && tender.creator_id !== req.user.id) {
+    } else if (req.user.role === "tender-creator" && tender.created_by !== req.user.id) {
       return res.status(403).json({ error: "Access denied" })
     }
 
     // Validate parent comment if provided
-    if (parentId) {
-      const parentResult = await query("SELECT id FROM comments WHERE id = $1 AND tender_id = $2", [parentId, tenderId])
+    if (parent_id) {
+      const parentResult = await query("SELECT id FROM comments WHERE id = $1 AND tender_id = $2", [parent_id, tenderId])
       if (parentResult.rows.length === 0) {
         return res.status(400).json({ error: "Parent comment not found" })
       }
@@ -157,10 +157,10 @@ router.post("/tender/:tenderId", authenticateToken, validate(schemas.createComme
 
     // Create comment
     const commentResult = await query(
-      `INSERT INTO comments (tender_id, author_id, message, parent_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO comments (tender_id, author_id, message, parent_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING *`,
-      [tenderId, req.user.id, message, parentId],
+      [tenderId, req.user.id, message, parent_id],
     )
 
     const comment = commentResult.rows[0]
@@ -174,18 +174,17 @@ router.post("/tender/:tenderId", authenticateToken, validate(schemas.createComme
       )) AND u.id != $3
     `
 
-    const notifyUsersResult = await query(notifyUsersQuery, [tender.creator_id, tenderId, req.user.id])
+    const notifyUsersResult = await query(notifyUsersQuery, [tender.created_by, tenderId, req.user.id])
 
     // Create notifications
     const notificationPromises = notifyUsersResult.rows.map((user) =>
-      createNotification(req.io, {
-        userId: user.id,
+      createNotification({
+        user_id: user.id,
         type: "comment",
         title: "New Comment",
         message: `${req.user.first_name} ${req.user.last_name} commented on '${tender.title}'`,
-        tenderId: tenderId,
-        priority: "medium",
-        actionUrl: `/tender-creator/tenders/${tenderId}#comments`,
+        reference_id: tenderId,
+        reference_type: "tender",
       }),
     )
 
@@ -250,7 +249,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
 
     // Update comment
     const result = await query(
-      "UPDATE comments SET message = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *",
+      "UPDATE comments SET message = $1, updated_at = NOW() WHERE id = $2 RETURNING *",
       [message, id],
     )
 
@@ -282,7 +281,7 @@ router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     // Check if comment exists and user has permission
     const commentResult = await query(
-      `SELECT c.author_id, c.tender_id, t.creator_id
+      `SELECT c.author_id, c.tender_id, t.created_by
        FROM comments c
        JOIN tenders t ON c.tender_id = t.id
        WHERE c.id = $1`,
@@ -296,7 +295,7 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     const comment = commentResult.rows[0]
 
     // Check permissions (author, tender creator, or admin can delete)
-    if (comment.author_id !== req.user.id && comment.creator_id !== req.user.id && req.user.role !== "admin") {
+    if (comment.author_id !== req.user.id && comment.created_by !== req.user.id && req.user.role !== "admin") {
       return res.status(403).json({ error: "Access denied" })
     }
 

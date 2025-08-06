@@ -1,8 +1,8 @@
 const express = require("express")
 const router = express.Router()
 const { query, transaction } = require("../config/database")
-const { verifyToken, isVendor, isResourceOwner } = require("../middleware/auth")
-const { validateBid } = require("../middleware/validation")
+const { authenticateToken, authorizeRoles } = require("../middleware/auth")
+const { validate, schemas } = require("../middleware/validation")
 const logger = require("../utils/logger")
 const notificationService = require("../services/notificationService")
 const emailService = require("../services/emailService")
@@ -12,7 +12,7 @@ const emailService = require("../services/emailService")
  * @desc    Get all bids (filtered by user role)
  * @access  Private
  */
-router.get("/", verifyToken, async (req, res) => {
+router.get("/", authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 10, status, tender_id } = req.query
     const offset = (page - 1) * limit
@@ -20,9 +20,11 @@ router.get("/", verifyToken, async (req, res) => {
 
     // Build query based on filters
     let queryText = `
-      SELECT b.*, t.title as tender_title, t.deadline, t.status as tender_status
+      SELECT b.*, t.title as tender_title, t.submission_deadline, t.status as tender_status,
+             u.first_name as vendor_first_name, u.last_name as vendor_last_name, u.company_name as vendor_company
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
+      JOIN users u ON b.vendor_id = u.id
     `
 
     const queryParams = []
@@ -61,22 +63,34 @@ router.get("/", verifyToken, async (req, res) => {
     const result = await query(queryText, queryParams)
 
     // Get total count for pagination
-    const countQueryText = `
+    let countQueryText = `
       SELECT COUNT(*) as total
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
-      ${req.user.role === "vendor" ? " WHERE b.vendor_id = $1" : ""}
-      ${req.user.role === "tender-creator" ? " WHERE t.created_by = $1" : ""}
-      ${status ? " AND b.status = $2" : ""}
-      ${tender_id ? ` AND b.tender_id = $${status ? 3 : 2}` : ""}
     `
 
     const countParams = []
-    if (req.user.role === "vendor" || req.user.role === "tender-creator") {
+    let countParamCount = 0
+
+    if (req.user.role === "vendor") {
+      countQueryText += ` WHERE b.vendor_id = $${++countParamCount}`
       countParams.push(userId)
+    } else if (req.user.role === "tender-creator") {
+      countQueryText += ` WHERE t.created_by = $${++countParamCount}`
+      countParams.push(userId)
+    } else if (req.user.role === "admin") {
+      countQueryText += ` WHERE 1=1`
     }
-    if (status) countParams.push(status)
-    if (tender_id) countParams.push(tender_id)
+
+    if (status) {
+      countQueryText += ` AND b.status = $${++countParamCount}`
+      countParams.push(status)
+    }
+
+    if (tender_id) {
+      countQueryText += ` AND b.tender_id = $${++countParamCount}`
+      countParams.push(tender_id)
+    }
 
     const countResult = await query(countQueryText, countParams)
     const total = Number.parseInt(countResult.rows[0].total)
@@ -104,7 +118,7 @@ router.get("/", verifyToken, async (req, res) => {
  * @desc    Get a single bid by ID
  * @access  Private
  */
-router.get("/:id", verifyToken, async (req, res) => {
+router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const bidId = req.params.id
     const userId = req.user.id
@@ -114,7 +128,7 @@ router.get("/:id", verifyToken, async (req, res) => {
       `
       SELECT b.*, 
              t.title as tender_title, t.description as tender_description, 
-             t.deadline, t.status as tender_status, t.base_price,
+             t.submission_deadline, t.status as tender_status, t.budget_min, t.budget_max,
              u.first_name as vendor_first_name, u.last_name as vendor_last_name,
              u.email as vendor_email, u.company_name as vendor_company
       FROM bids b
@@ -186,7 +200,7 @@ router.get("/:id", verifyToken, async (req, res) => {
  * @desc    Create a new bid
  * @access  Private (Vendors only)
  */
-router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
+router.post("/", authenticateToken, authorizeRoles('vendor'), validate(schemas.createBid), async (req, res) => {
   try {
     const { tender_id, amount, currency, validity_period, description, documents } = req.body
     const vendorId = req.user.id
@@ -196,7 +210,7 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
       `
       SELECT t.*, u.email as creator_email, u.first_name as creator_first_name, u.last_name as creator_last_name
       FROM tenders t
-      JOIN users u ON t.creator_id = u.id
+      JOIN users u ON t.created_by = u.id
       WHERE t.id = $1 AND t.status = 'published'
     `,
       [tender_id],
@@ -216,22 +230,6 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Submission deadline has passed.",
-      })
-    }
-
-    // Check if vendor is invited to this tender
-    const invitationResult = await query(
-      `
-      SELECT * FROM tender_invitations
-      WHERE tender_id = $1 AND vendor_id = $2
-    `,
-      [tender_id, vendorId],
-    )
-
-    if (invitationResult.rows.length === 0) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not invited to bid on this tender.",
       })
     }
 
@@ -256,8 +254,8 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
       // Insert bid
       const bidResult = await client.query(
         `
-        INSERT INTO bids (tender_id, vendor_id, amount, currency, validity_period, description, status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'submitted')
+        INSERT INTO bids (tender_id, vendor_id, amount, currency, validity_period, description, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'submitted', NOW(), NOW())
         RETURNING *
       `,
         [tender_id, vendorId, amount, currency, validity_period, description],
@@ -270,8 +268,8 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
         for (const doc of documents) {
           await client.query(
             `
-            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
           `,
             [bid.id, doc.file_name, doc.file_path, doc.file_size, doc.file_type],
           )
@@ -293,27 +291,16 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
 
     // Create notification for tender creator
     await notificationService.createNotification({
-      user_id: tender.creator_id,
+      user_id: tender.created_by,
       type: "bid_submitted",
       title: "New Bid Submitted",
-      message: `${vendor.company_name} has submitted a bid for tender ${tender.reference_number}`,
+      message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has submitted a bid for tender "${tender.title}"`,
       reference_id: result.id,
       reference_type: "bid",
     })
 
     // Send email notification
     await emailService.sendBidSubmissionEmail(result, tender, vendor)
-
-    // Emit socket event
-    if (req.io) {
-      req.io.to(`user:${tender.creator_id}`).emit("bid_submitted", {
-        bid_id: result.id,
-        tender_id: tender.id,
-        vendor_name: vendor.company_name,
-        amount: result.amount,
-        currency: result.currency,
-      })
-    }
 
     res.status(201).json({
       success: true,
@@ -331,7 +318,7 @@ router.post("/", verifyToken, isVendor, validateBid, async (req, res) => {
  * @desc    Update a bid
  * @access  Private (Vendors - own bids only)
  */
-router.put("/:id", verifyToken, isVendor, isResourceOwner("bid"), validateBid, async (req, res) => {
+router.put("/:id", authenticateToken, authorizeRoles('vendor'), validate(schemas.updateBid), async (req, res) => {
   try {
     const bidId = req.params.id
     const { amount, currency, validity_period, description, documents } = req.body
@@ -339,12 +326,12 @@ router.put("/:id", verifyToken, isVendor, isResourceOwner("bid"), validateBid, a
     // Check if bid exists and can be updated
     const bidResult = await query(
       `
-      SELECT b.*, t.submission_deadline, t.status as tender_status, t.creator_id
+      SELECT b.*, t.submission_deadline, t.status as tender_status, t.created_by
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
-      WHERE b.id = $1
+      WHERE b.id = $1 AND b.vendor_id = $2
     `,
-      [bidId],
+      [bidId, req.user.id],
     )
 
     if (bidResult.rows.length === 0) {
@@ -408,8 +395,8 @@ router.put("/:id", verifyToken, isVendor, isResourceOwner("bid"), validateBid, a
         for (const doc of documents) {
           await client.query(
             `
-            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
           `,
             [bidId, doc.file_name, doc.file_path, doc.file_size, doc.file_type],
           )
@@ -431,22 +418,13 @@ router.put("/:id", verifyToken, isVendor, isResourceOwner("bid"), validateBid, a
 
     // Create notification for tender creator
     await notificationService.createNotification({
-      user_id: bid.creator_id,
+      user_id: bid.created_by,
       type: "bid_revised",
       title: "Bid Updated",
-      message: `${vendor.company_name} has updated their bid for tender ${bid.reference_number}`,
+      message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has updated their bid`,
       reference_id: bidId,
       reference_type: "bid",
     })
-
-    // Emit socket event
-    if (req.io) {
-      req.io.to(`user:${bid.creator_id}`).emit("bid_revised", {
-        bid_id: bidId,
-        tender_id: bid.tender_id,
-        vendor_name: vendor.company_name,
-      })
-    }
 
     res.status(200).json({
       success: true,
@@ -464,19 +442,19 @@ router.put("/:id", verifyToken, isVendor, isResourceOwner("bid"), validateBid, a
  * @desc    Delete a bid
  * @access  Private (Vendors - own bids only)
  */
-router.delete("/:id", verifyToken, isVendor, isResourceOwner("bid"), async (req, res) => {
+router.delete("/:id", authenticateToken, authorizeRoles('vendor'), async (req, res) => {
   try {
     const bidId = req.params.id
 
     // Check if bid exists and can be withdrawn
     const bidResult = await query(
       `
-      SELECT b.*, t.submission_deadline, t.status as tender_status, t.creator_id, t.reference_number
+      SELECT b.*, t.submission_deadline, t.status as tender_status, t.created_by, t.title
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
-      WHERE b.id = $1
+      WHERE b.id = $1 AND b.vendor_id = $2
     `,
-      [bidId],
+      [bidId, req.user.id],
     )
 
     if (bidResult.rows.length === 0) {
@@ -526,22 +504,13 @@ router.delete("/:id", verifyToken, isVendor, isResourceOwner("bid"), async (req,
 
     // Create notification for tender creator
     await notificationService.createNotification({
-      user_id: bid.creator_id,
+      user_id: bid.created_by,
       type: "bid_withdrawn",
       title: "Bid Withdrawn",
-      message: `${vendor.company_name} has withdrawn their bid for tender ${bid.reference_number}`,
+      message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has withdrawn their bid for "${bid.title}"`,
       reference_id: bidId,
       reference_type: "bid",
     })
-
-    // Emit socket event
-    if (req.io) {
-      req.io.to(`user:${bid.creator_id}`).emit("bid_withdrawn", {
-        bid_id: bidId,
-        tender_id: bid.tender_id,
-        vendor_name: vendor.company_name,
-      })
-    }
 
     res.status(200).json({
       success: true,
@@ -558,7 +527,7 @@ router.delete("/:id", verifyToken, isVendor, isResourceOwner("bid"), async (req,
  * @desc    Award a bid (mark as accepted)
  * @access  Private (Tender creators and admins)
  */
-router.put("/:id/award", verifyToken, async (req, res) => {
+router.put("/:id/award", authenticateToken, authorizeRoles('tender-creator', 'admin'), async (req, res) => {
   try {
     const bidId = req.params.id
 
@@ -583,9 +552,9 @@ router.put("/:id/award", verifyToken, async (req, res) => {
     }
 
     // Check if tender is in the right state
-    if (bid.tender_status !== "open" && bid.tender_status !== "under_review") {
+    if (bid.tender_status !== "published") {
       return res.status(400).json({
-        message: "Cannot award bid: Tender must be open or under review",
+        message: "Cannot award bid: Tender must be published",
       })
     }
 
@@ -649,27 +618,6 @@ router.put("/:id/award", verifyToken, async (req, res) => {
       })
     }
 
-    // Send real-time notifications via Socket.IO
-    if (req.io) {
-      // Notify winning vendor
-      req.io.to(`user:${winner.id}`).emit("notification", {
-        type: "bid_accepted",
-        title: "Bid Accepted",
-        message: `Your bid for "${bid.title}" has been accepted!`,
-        tenderId: bid.tender_id,
-      })
-
-      // Notify other vendors
-      for (const vendor of otherVendorRows) {
-        req.io.to(`user:${vendor.id}`).emit("notification", {
-          type: "bid_rejected",
-          title: "Bid Not Selected",
-          message: `Your bid for "${bid.title}" was not selected.`,
-          tenderId: bid.tender_id,
-        })
-      }
-    }
-
     res.json({ message: "Bid awarded successfully" })
   } catch (error) {
     logger.error("Error awarding bid:", error)
@@ -682,7 +630,7 @@ router.put("/:id/award", verifyToken, async (req, res) => {
  * @desc    Get all bids for a specific tender
  * @access  Private (Tender creators and admins)
  */
-router.get("/tender/:tenderId", verifyToken, async (req, res) => {
+router.get("/tender/:tenderId", authenticateToken, async (req, res) => {
   try {
     const tenderId = req.params.tenderId
 

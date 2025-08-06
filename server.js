@@ -1,16 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const morgan = require('morgan');
-const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const { createServer } = require('http');
-const { Server } = require('socket.io');
+const compression = require('compression');
+const morgan = require('morgan');
 const path = require('path');
 require('dotenv').config();
 
 const logger = require('./src/utils/logger');
-const { connectDB } = require('./src/config/database');
 const errorHandler = require('./src/middleware/errorHandler');
 
 // Import routes
@@ -24,15 +21,22 @@ const uploadRoutes = require('./src/routes/uploads');
 const dashboardRoutes = require('./src/routes/dashboard');
 
 const app = express();
-const server = createServer(app);
 
-// Socket.IO setup
-const io = new Server(server, {
-  cors: {
-    origin: process.env.SOCKET_CORS_ORIGIN || "http://localhost:3000",
-    methods: ["GET", "POST"]
-  }
-});
+// Trust proxy
+app.set('trust proxy', 1);
+
+// Security middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -43,28 +47,40 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
+app.use(limiter);
+
+// Compression middleware
 app.use(compression());
-app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
+
+// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(limiter);
+
+// Logging middleware
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined', {
+    stream: {
+      write: (message) => logger.info(message.trim())
+    }
+  }));
+}
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Make io available to routes
-app.use((req, res, next) => {
-  req.io = io;
-  next();
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV
+  });
 });
 
-// Routes
+// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/tenders', tenderRoutes);
@@ -74,75 +90,32 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Socket.IO connection handling
-io.on('connection', (socket) => {
-  logger.info(`User connected: ${socket.id}`);
-
-  socket.on('join-room', (userId) => {
-    socket.join(`user-${userId}`);
-    logger.info(`User ${userId} joined room user-${userId}`);
-  });
-
-  socket.on('disconnect', () => {
-    logger.info(`User disconnected: ${socket.id}`);
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: 'Route not found'
   });
 });
 
 // Error handling middleware
 app.use(errorHandler);
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
-});
-
-const PORT = process.env.PORT || 5000;
-
-// Start server
-const startServer = async () => {
-  try {
-    // Connect to database
-    await connectDB();
-    
-    // Start server
-    server.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV}`);
-      logger.info(`Frontend URL: ${process.env.FRONTEND_URL}`);
-    });
-  } catch (error) {
-    logger.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-startServer();
-
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    logger.info('Process terminated');
-  });
+  logger.info('SIGTERM received. Shutting down gracefully...');
+  process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  server.close(() => {
-    logger.info('Process terminated');
-  });
+  logger.info('SIGINT received. Shutting down gracefully...');
+  process.exit(0);
+});
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
 });
 
 module.exports = app;

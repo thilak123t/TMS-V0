@@ -5,14 +5,7 @@ const errorHandler = (err, req, res, next) => {
   error.message = err.message;
 
   // Log error
-  logger.error('Error occurred:', {
-    message: err.message,
-    stack: err.stack,
-    url: req.url,
-    method: req.method,
-    ip: req.ip,
-    userAgent: req.get('User-Agent')
-  });
+  logger.error(err);
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {
@@ -28,7 +21,7 @@ const errorHandler = (err, req, res, next) => {
 
   // Mongoose validation error
   if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map(val => val.message).join(', ');
+    const message = Object.values(err.errors).map(val => val.message);
     error = { message, statusCode: 400 };
   }
 
@@ -43,37 +36,9 @@ const errorHandler = (err, req, res, next) => {
     error = { message, statusCode: 401 };
   }
 
-  // PostgreSQL errors
-  if (err.code === '23505') { // Unique violation
-    const message = 'Duplicate entry - resource already exists';
-    error = { message, statusCode: 409 };
-  }
-
-  if (err.code === '23503') { // Foreign key violation
-    const message = 'Referenced resource does not exist';
-    error = { message, statusCode: 400 };
-  }
-
-  if (err.code === '23502') { // Not null violation
-    const message = 'Required field is missing';
-    error = { message, statusCode: 400 };
-  }
-
-  // File upload errors
-  if (err.code === 'LIMIT_FILE_SIZE') {
-    const message = 'File too large';
-    error = { message, statusCode: 413 };
-  }
-
-  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-    const message = 'Unexpected file field';
-    error = { message, statusCode: 400 };
-  }
-
   res.status(error.statusCode || 500).json({
     success: false,
-    message: error.message || 'Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    error: error.message || 'Server Error'
   });
 };
 
