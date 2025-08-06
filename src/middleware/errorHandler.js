@@ -11,7 +11,13 @@ const errorHandler = (err, req, res, next) => {
   error.message = err.message;
 
   // Log error
-  logger.error(err);
+  logger.error(`Error ${err.message}`, {
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+    ip: req.ip,
+    userAgent: req.get('User-Agent')
+  });
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {
@@ -43,24 +49,25 @@ const errorHandler = (err, req, res, next) => {
   }
 
   // PostgreSQL errors
-  if (err.code === '23505') { // Unique violation
+  if (err.code === '23505') {
     const message = 'Duplicate entry';
     error = { message, statusCode: 409 };
   }
 
-  if (err.code === '23503') { // Foreign key violation
-    const message = 'Referenced record not found';
+  if (err.code === '23503') {
+    const message = 'Foreign key constraint violation';
     error = { message, statusCode: 400 };
   }
 
-  if (err.code === '23502') { // Not null violation
+  if (err.code === '23502') {
     const message = 'Required field missing';
     error = { message, statusCode: 400 };
   }
 
   res.status(error.statusCode || 500).json({
     success: false,
-    error: error.message || 'Server Error'
+    error: error.message || 'Server Error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 };
 
