@@ -22,7 +22,7 @@ class EmailService {
       }
     };
 
-    const transporter = nodemailer.createTransporter(config);
+    const transporter = nodemailer.createTransport(config);
 
     // Verify connection configuration
     transporter.verify((error, success) => {
