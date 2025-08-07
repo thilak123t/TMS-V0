@@ -3,13 +3,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
-const { 
-  validateUserRegistration, 
-  validateUserLogin, 
-  validatePasswordReset, 
-  validatePasswordResetConfirm 
-} = require('../middleware/validation');
-const { authenticateToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -42,6 +35,120 @@ const asyncHandler = (fn) => (req, res, next) => {
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+  });
+};
+
+// Simple validation middleware
+const validateUserRegistration = (req, res, next) => {
+  const { email, password, firstName, lastName, role } = req.body;
+  
+  if (!email || !password || !firstName || !lastName || !role) {
+    return res.status(400).json({
+      success: false,
+      message: 'All required fields must be provided'
+    });
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: 'Password must be at least 6 characters long'
+    });
+  }
+  
+  if (!['admin', 'tender-creator', 'vendor'].includes(role)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid role specified'
+    });
+  }
+  
+  next();
+};
+
+const validateUserLogin = (req, res, next) => {
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email and password are required'
+    });
+  }
+  
+  next();
+};
+
+const validatePasswordReset = (req, res, next) => {
+  const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      message: 'Email is required'
+    });
+  }
+  
+  next();
+};
+
+const validatePasswordResetConfirm = (req, res, next) => {
+  const { token, password } = req.body;
+  
+  if (!token || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Token and password are required'
+    });
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: 'Password must be at least 6 characters long'
+    });
+  }
+  
+  next();
+};
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: 'Access token is required'
+    });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
+    if (err) {
+      return res.status(403).json({
+        success: false,
+        message: 'Invalid or expired token'
+      });
+    }
+
+    try {
+      const result = await pool.query('SELECT id, email, role FROM users WHERE id = $1', [decoded.userId]);
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found'
+        });
+      }
+
+      req.user = result.rows[0];
+      next();
+    } catch (error) {
+      logger.error('Token verification error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Server error during authentication'
+      });
+    }
   });
 };
 
@@ -272,7 +379,7 @@ router.post('/forgot-password', validatePasswordReset, asyncHandler(async (req, 
       { expiresIn: '1h' }
     );
 
-    // Store reset token in database (you might want to create a password_resets table)
+    // Store reset token in database
     await pool.query(
       'UPDATE users SET reset_token = $1, reset_token_expires = NOW() + INTERVAL \'1 hour\' WHERE id = $2',
       [resetToken, user.id]
