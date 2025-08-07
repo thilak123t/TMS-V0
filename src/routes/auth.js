@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
-const { validate, schemas } = require('../middleware/validation');
+const { validateUserRegistration, validateUserLogin } = require('../middleware/validation');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -38,8 +38,8 @@ const generateToken = (userId) => {
 // @route   POST /api/auth/register
 // @desc    Register user
 // @access  Public
-router.post('/register', authLimiter, validate(schemas.register), asyncHandler(async (req, res) => {
-  const { email, password, first_name, last_name, role, company_name } = req.body;
+router.post('/register', authLimiter, validateUserRegistration, asyncHandler(async (req, res) => {
+  const { email, password, firstName, lastName, role, company } = req.body;
 
   // Check if user exists
   const userExists = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
@@ -59,7 +59,7 @@ router.post('/register', authLimiter, validate(schemas.register), asyncHandler(a
     `INSERT INTO users (email, password, first_name, last_name, role, company_name, created_at, updated_at) 
      VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
      RETURNING id, email, first_name, last_name, role, company_name, created_at`,
-    [email, hashedPassword, first_name, last_name, role, company_name]
+    [email, hashedPassword, firstName, lastName, role, company]
   );
 
   const user = result.rows[0];
@@ -85,7 +85,7 @@ router.post('/register', authLimiter, validate(schemas.register), asyncHandler(a
 // @route   POST /api/auth/login
 // @desc    Login user
 // @access  Public
-router.post('/login', authLimiter, validate(schemas.login), asyncHandler(async (req, res) => {
+router.post('/login', authLimiter, validateUserLogin, asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
   // Check if user exists
