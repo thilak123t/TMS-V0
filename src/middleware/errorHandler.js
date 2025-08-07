@@ -98,7 +98,13 @@ const errorHandler = (err, req, res, next) => {
   });
 };
 
+// Async handler wrapper
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
 module.exports = {
   notFound,
-  errorHandler
+  errorHandler,
+  asyncHandler
 };

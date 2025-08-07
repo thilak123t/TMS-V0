@@ -1,6 +1,6 @@
 const express = require('express');
 const { Pool } = require('pg');
-const authenticateToken = require('../middleware/auth');
+const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { 
   validateTenderCreation, 
   validateTenderUpdate, 
@@ -24,27 +24,6 @@ const pool = new Pool({
 // Async handler wrapper
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
-};
-
-// Authorization middleware for roles
-const authorizeRoles = (...roles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required'
-      });
-    }
-
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Insufficient permissions'
-      });
-    }
-
-    next();
-  };
 };
 
 // @route   GET /api/tenders
@@ -264,7 +243,7 @@ router.post('/', authenticateToken, authorizeRoles('tender-creator', 'admin'), v
     description,
     category,
     budget,
-    submissionDeadline,
+    deadline,
     requirements,
     location,
     attachments = []
@@ -273,7 +252,7 @@ router.post('/', authenticateToken, authorizeRoles('tender-creator', 'admin'), v
   try {
     const result = await pool.query(`
       INSERT INTO tenders (
-        title, description, category, budget, submission_deadline,
+        title, description, category, budget, deadline,
         requirements, location, attachments, created_by, status, created_at, updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', NOW(), NOW())
       RETURNING *
@@ -282,7 +261,7 @@ router.post('/', authenticateToken, authorizeRoles('tender-creator', 'admin'), v
       description,
       category,
       budget,
-      submissionDeadline,
+      deadline,
       requirements,
       location,
       JSON.stringify(attachments),
@@ -536,7 +515,7 @@ router.post('/:id/award', authenticateToken, authorizeRoles('tender-creator', 'a
 
     // Update tender status and awarded bid
     await pool.query(
-      'UPDATE tenders SET status = $1, awarded_to = $2, updated_at = NOW() WHERE id = $3',
+      'UPDATE tenders SET status = $1, awarded_bid_id = $2, updated_at = NOW() WHERE id = $3',
       ['awarded', bidId, id]
     );
 
@@ -622,7 +601,7 @@ router.post('/:id/invite', authenticateToken, authorizeRoles('tender-creator', '
       if (existingInvitation.rows.length === 0) {
         // Create invitation
         await pool.query(
-          'INSERT INTO tender_invitations (tender_id, vendor_id, invited_by, message, created_at) VALUES ($1, $2, $3, $4, NOW())',
+          'INSERT INTO tender_invitations (tender_id, vendor_id, invited_by, message, invited_at) VALUES ($1, $2, $3, $4, NOW())',
           [id, vendor.id, req.user.id, message]
         );
 

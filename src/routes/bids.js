@@ -1,10 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const { query, transaction } = require("../config/database")
-const authenticateToken = require("../middleware/auth");
-const { authorizeRoles } = require("../middleware/auth");
-// If authorizeRoles is also exported as default or separately, import accordingly
-// const authorizeRoles = require("../middleware/authorizeRoles");
+const { authenticateToken, authorizeRoles } = require("../middleware/auth");
 const { validate, schemas } = require("../middleware/validation")
 const logger = require("../utils/logger")
 const notificationService = require("../services/notificationService")
@@ -23,7 +20,7 @@ router.get("/", authenticateToken, async (req, res) => {
 
     // Build query based on filters
     let queryText = `
-      SELECT b.*, t.title as tender_title, t.submission_deadline, t.status as tender_status,
+      SELECT b.*, t.title as tender_title, t.deadline as submission_deadline, t.status as tender_status,
              u.first_name as vendor_first_name, u.last_name as vendor_last_name, u.company_name as vendor_company
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
@@ -131,7 +128,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
       `
       SELECT b.*, 
              t.title as tender_title, t.description as tender_description, 
-             t.submission_deadline, t.status as tender_status, t.budget_min, t.budget_max,
+             t.deadline as submission_deadline, t.status as tender_status, t.budget,
              u.first_name as vendor_first_name, u.last_name as vendor_last_name,
              u.email as vendor_email, u.company_name as vendor_company
       FROM bids b
@@ -162,20 +159,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
       }
     }
 
-    // Get bid documents
-    const documentsResult = await query(
-      `
-      SELECT id, file_name, file_path, file_size, file_type, created_at
-      FROM bid_documents
-      WHERE bid_id = $1
-    `,
-      [bidId],
-    )
-
     // Get bid evaluation if available
     const evaluationResult = await query(
       `
-      SELECT id, technical_score, financial_score, total_score, comments, evaluated_by, created_at
+      SELECT id, technical_score, financial_score, overall_score, comments, evaluator_id, created_at
       FROM bid_evaluations
       WHERE bid_id = $1
     `,
@@ -184,7 +171,6 @@ router.get("/:id", authenticateToken, async (req, res) => {
 
     const bidWithDetails = {
       ...bid,
-      documents: documentsResult.rows,
       evaluation: evaluationResult.rows[0] || null,
     }
 
@@ -229,7 +215,7 @@ router.post("/", authenticateToken, authorizeRoles('vendor'), validate(schemas.c
     const tender = tenderResult.rows[0]
 
     // Check if submission deadline has passed
-    if (new Date(tender.submission_deadline) < new Date()) {
+    if (new Date(tender.deadline) < new Date()) {
       return res.status(400).json({
         success: false,
         message: "Submission deadline has passed.",
@@ -257,29 +243,14 @@ router.post("/", authenticateToken, authorizeRoles('vendor'), validate(schemas.c
       // Insert bid
       const bidResult = await client.query(
         `
-        INSERT INTO bids (tender_id, vendor_id, amount, currency, validity_period, description, status, created_at, updated_at)
+        INSERT INTO bids (tender_id, vendor_id, amount, currency, delivery_time, proposal, status, created_at, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, 'submitted', NOW(), NOW())
         RETURNING *
       `,
         [tender_id, vendorId, amount, currency, validity_period, description],
       )
 
-      const bid = bidResult.rows[0]
-
-      // Insert documents if provided
-      if (documents && documents.length > 0) {
-        for (const doc of documents) {
-          await client.query(
-            `
-            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type, created_at)
-            VALUES ($1, $2, $3, $4, $5, NOW())
-          `,
-            [bid.id, doc.file_name, doc.file_path, doc.file_size, doc.file_type],
-          )
-        }
-      }
-
-      return bid
+      return bidResult.rows[0]
     })
 
     // Get vendor details
@@ -295,7 +266,7 @@ router.post("/", authenticateToken, authorizeRoles('vendor'), validate(schemas.c
     // Create notification for tender creator
     await notificationService.createNotification({
       user_id: tender.created_by,
-      type: "bid_submitted",
+      type: "bid_received",
       title: "New Bid Submitted",
       message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has submitted a bid for tender "${tender.title}"`,
       reference_id: result.id,
@@ -329,7 +300,7 @@ router.put("/:id", authenticateToken, authorizeRoles('vendor'), validate(schemas
     // Check if bid exists and can be updated
     const bidResult = await query(
       `
-      SELECT b.*, t.submission_deadline, t.status as tender_status, t.created_by
+      SELECT b.*, t.deadline as submission_deadline, t.status as tender_status, t.created_by
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
       WHERE b.id = $1 AND b.vendor_id = $2
@@ -347,7 +318,7 @@ router.put("/:id", authenticateToken, authorizeRoles('vendor'), validate(schemas
     const bid = bidResult.rows[0]
 
     // Check if bid can be updated (not evaluated, accepted or rejected)
-    if (["evaluated", "accepted", "rejected"].includes(bid.status)) {
+    if (["under_review", "accepted", "rejected"].includes(bid.status)) {
       return res.status(400).json({
         success: false,
         message: `Bid cannot be updated because it has been ${bid.status}.`,
@@ -376,35 +347,12 @@ router.put("/:id", authenticateToken, authorizeRoles('vendor'), validate(schemas
       const updateResult = await client.query(
         `
         UPDATE bids
-        SET amount = $1, currency = $2, validity_period = $3, description = $4, status = 'revised', updated_at = NOW()
+        SET amount = $1, currency = $2, delivery_time = $3, proposal = $4, status = 'submitted', updated_at = NOW()
         WHERE id = $5
         RETURNING *
       `,
         [amount, currency, validity_period, description, bidId],
       )
-
-      // Handle documents if provided
-      if (documents && documents.length > 0) {
-        // Delete existing documents
-        await client.query(
-          `
-          DELETE FROM bid_documents
-          WHERE bid_id = $1
-        `,
-          [bidId],
-        )
-
-        // Insert new documents
-        for (const doc of documents) {
-          await client.query(
-            `
-            INSERT INTO bid_documents (bid_id, file_name, file_path, file_size, file_type, created_at)
-            VALUES ($1, $2, $3, $4, $5, NOW())
-          `,
-            [bidId, doc.file_name, doc.file_path, doc.file_size, doc.file_type],
-          )
-        }
-      }
 
       return updateResult.rows[0]
     })
@@ -422,7 +370,7 @@ router.put("/:id", authenticateToken, authorizeRoles('vendor'), validate(schemas
     // Create notification for tender creator
     await notificationService.createNotification({
       user_id: bid.created_by,
-      type: "bid_revised",
+      type: "bid_received",
       title: "Bid Updated",
       message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has updated their bid`,
       reference_id: bidId,
@@ -452,7 +400,7 @@ router.delete("/:id", authenticateToken, authorizeRoles('vendor'), async (req, r
     // Check if bid exists and can be withdrawn
     const bidResult = await query(
       `
-      SELECT b.*, t.submission_deadline, t.status as tender_status, t.created_by, t.title
+      SELECT b.*, t.deadline as submission_deadline, t.status as tender_status, t.created_by, t.title
       FROM bids b
       JOIN tenders t ON b.tender_id = t.id
       WHERE b.id = $1 AND b.vendor_id = $2
@@ -470,7 +418,7 @@ router.delete("/:id", authenticateToken, authorizeRoles('vendor'), async (req, r
     const bid = bidResult.rows[0]
 
     // Check if bid can be withdrawn (not evaluated, accepted or rejected)
-    if (["evaluated", "accepted", "rejected"].includes(bid.status)) {
+    if (["under_review", "accepted", "rejected"].includes(bid.status)) {
       return res.status(400).json({
         success: false,
         message: `Bid cannot be withdrawn because it has been ${bid.status}.`,
@@ -508,7 +456,7 @@ router.delete("/:id", authenticateToken, authorizeRoles('vendor'), async (req, r
     // Create notification for tender creator
     await notificationService.createNotification({
       user_id: bid.created_by,
-      type: "bid_withdrawn",
+      type: "bid_received",
       title: "Bid Withdrawn",
       message: `${vendor.company_name || vendor.first_name + ' ' + vendor.last_name} has withdrawn their bid for "${bid.title}"`,
       reference_id: bidId,

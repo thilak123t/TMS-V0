@@ -10,7 +10,7 @@ const router = express.Router();
 // @desc    Get user notifications
 // @route   GET /api/notifications
 // @access  Private
-router.get('/', authenticateToken, validate(schemas.pagination, 'query'), asyncHandler(async (req, res) => {
+router.get('/', authenticateToken, validate(schemas.pagination), asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, unread_only = false } = req.query;
   const offset = (page - 1) * limit;
 

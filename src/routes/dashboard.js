@@ -195,7 +195,7 @@ router.get('/vendor', authenticateToken, authorizeRoles('vendor'), asyncHandler(
       FROM tenders t
       LEFT JOIN bids b ON t.id = b.tender_id AND b.vendor_id = $1
       WHERE t.status = 'published' 
-      AND t.submission_deadline > NOW()
+      AND t.deadline > NOW()
       AND b.id IS NULL
     `, [userId]);
 

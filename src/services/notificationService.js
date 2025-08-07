@@ -1,206 +1,161 @@
-const db = require("../config/database")
-const logger = require("../utils/logger")
+const { query } = require('../config/database');
+const logger = require('../utils/logger');
 
-/**
- * Create a notification
- * @param {Object} notification - Notification object
- * @param {string} notification.user_id - User ID
- * @param {string} notification.type - Notification type
- * @param {string} notification.title - Notification title
- * @param {string} notification.message - Notification message
- * @param {string} notification.reference_id - Reference ID (optional)
- * @param {string} notification.reference_type - Reference type (optional)
- * @returns {Promise<Object>} - Created notification
- */
-const createNotification = async (notification) => {
-  try {
-    const { user_id, type, title, message, reference_id, reference_type } = notification
+class NotificationService {
+  // Create a single notification
+  async createNotification({ user_id, type, title, message, reference_id, reference_type }) {
+    try {
+      const result = await query(
+        `INSERT INTO notifications (user_id, type, title, message, related_id, is_read, created_at)
+         VALUES ($1, $2, $3, $4, $5, false, NOW())
+         RETURNING *`,
+        [user_id, type, title, message, reference_id]
+      );
 
-    const { rows } = await db.query(
-      `INSERT INTO notifications 
-       (user_id, type, title, message, reference_id, reference_type, read)
-       VALUES ($1, $2, $3, $4, $5, $6, false)
-       RETURNING *`,
-      [user_id, type, title, message, reference_id, reference_type],
-    )
-
-    logger.info(`Notification created for user ${user_id}: ${type}`)
-    return rows[0]
-  } catch (error) {
-    logger.error("Error creating notification:", error)
-    throw error
+      logger.info(`Notification created for user ${user_id}: ${title}`);
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error creating notification:', error);
+      throw error;
+    }
   }
-}
 
-/**
- * Create multiple notifications at once
- * @param {Array} notifications - Array of notification objects
- * @returns {Promise<Array>} - Created notifications
- */
-const createBulkNotifications = async (notifications) => {
-  try {
-    // Use a transaction to ensure all notifications are created or none
-    return await db.transaction(async (client) => {
-      const createdNotifications = []
+  // Create bulk notifications
+  async createBulkNotifications(notifications) {
+    try {
+      const values = [];
+      const placeholders = [];
+      
+      notifications.forEach((notification, index) => {
+        const baseIndex = index * 5;
+        placeholders.push(`($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, $${baseIndex + 4}, $${baseIndex + 5}, false, NOW())`);
+        values.push(
+          notification.user_id,
+          notification.type,
+          notification.title,
+          notification.message,
+          notification.reference_id || null
+        );
+      });
 
-      for (const notification of notifications) {
-        const { user_id, type, title, message, reference_id, reference_type } = notification
+      const queryText = `
+        INSERT INTO notifications (user_id, type, title, message, related_id, is_read, created_at)
+        VALUES ${placeholders.join(', ')}
+        RETURNING *
+      `;
 
-        const { rows } = await client.query(
-          `INSERT INTO notifications 
-           (user_id, type, title, message, reference_id, reference_type, read)
-           VALUES ($1, $2, $3, $4, $5, $6, false)
-           RETURNING *`,
-          [user_id, type, title, message, reference_id, reference_type],
-        )
+      const result = await query(queryText, values);
+      
+      logger.info(`${notifications.length} bulk notifications created`);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error creating bulk notifications:', error);
+      throw error;
+    }
+  }
 
-        createdNotifications.push(rows[0])
+  // Get notifications for a user
+  async getUserNotifications(userId, { limit = 20, offset = 0, unreadOnly = false } = {}) {
+    try {
+      let queryText = `
+        SELECT * FROM notifications
+        WHERE user_id = $1
+      `;
+      
+      const params = [userId];
+      
+      if (unreadOnly) {
+        queryText += ` AND is_read = false`;
+      }
+      
+      queryText += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await query(queryText, params);
+      
+      return result.rows;
+    } catch (error) {
+      logger.error('Error fetching user notifications:', error);
+      throw error;
+    }
+  }
+
+  // Mark notification as read
+  async markNotificationAsRead(notificationId, userId) {
+    try {
+      const result = await query(
+        `UPDATE notifications 
+         SET is_read = true 
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [notificationId, userId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Notification not found or access denied');
       }
 
-      logger.info(`Bulk created ${createdNotifications.length} notifications`)
-      return createdNotifications
-    })
-  } catch (error) {
-    logger.error("Error creating bulk notifications:", error)
-    throw error
-  }
-}
-
-/**
- * Get notifications for a user
- * @param {string} userId - User ID
- * @param {Object} options - Query options
- * @param {number} options.limit - Limit results
- * @param {number} options.offset - Offset results
- * @param {boolean} options.unreadOnly - Get only unread notifications
- * @returns {Promise<Array>} - Notifications
- */
-const getUserNotifications = async (userId, options = {}) => {
-  try {
-    const { limit = 20, offset = 0, unreadOnly = false } = options
-
-    let query = `
-      SELECT * FROM notifications
-      WHERE user_id = $1
-    `
-
-    const params = [userId]
-
-    if (unreadOnly) {
-      query += ` AND read = false`
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error marking notification as read:', error);
+      throw error;
     }
-
-    query += ` ORDER BY created_at DESC LIMIT $2 OFFSET $3`
-
-    const { rows } = await db.query(query, [...params, limit, offset])
-    return rows
-  } catch (error) {
-    logger.error("Error getting user notifications:", error)
-    throw error
   }
-}
 
-/**
- * Mark notification as read
- * @param {string} notificationId - Notification ID
- * @param {string} userId - User ID (for authorization)
- * @returns {Promise<Object>} - Updated notification
- */
-const markNotificationAsRead = async (notificationId, userId) => {
-  try {
-    const { rows } = await db.query(
-      `UPDATE notifications
-       SET read = true, updated_at = NOW()
-       WHERE id = $1 AND user_id = $2
-       RETURNING *`,
-      [notificationId, userId],
-    )
+  // Mark all notifications as read for a user
+  async markAllNotificationsAsRead(userId) {
+    try {
+      const result = await query(
+        `UPDATE notifications 
+         SET is_read = true 
+         WHERE user_id = $1 AND is_read = false`,
+        [userId]
+      );
 
-    if (rows.length === 0) {
-      throw new Error("Notification not found or unauthorized")
+      logger.info(`Marked ${result.rowCount} notifications as read for user ${userId}`);
+      return result.rowCount;
+    } catch (error) {
+      logger.error('Error marking all notifications as read:', error);
+      throw error;
     }
-
-    return rows[0]
-  } catch (error) {
-    logger.error("Error marking notification as read:", error)
-    throw error
   }
-}
 
-/**
- * Mark all notifications as read for a user
- * @param {string} userId - User ID
- * @returns {Promise<number>} - Number of updated notifications
- */
-const markAllNotificationsAsRead = async (userId) => {
-  try {
-    const { rowCount } = await db.query(
-      `UPDATE notifications
-       SET read = true, updated_at = NOW()
-       WHERE user_id = $1 AND read = false`,
-      [userId],
-    )
+  // Get unread count for a user
+  async getUnreadCount(userId) {
+    try {
+      const result = await query(
+        `SELECT COUNT(*) as count FROM notifications 
+         WHERE user_id = $1 AND is_read = false`,
+        [userId]
+      );
 
-    logger.info(`Marked ${rowCount} notifications as read for user ${userId}`)
-    return rowCount
-  } catch (error) {
-    logger.error("Error marking all notifications as read:", error)
-    throw error
-  }
-}
-
-/**
- * Delete a notification
- * @param {string} notificationId - Notification ID
- * @param {string} userId - User ID (for authorization)
- * @returns {Promise<boolean>} - Success status
- */
-const deleteNotification = async (notificationId, userId) => {
-  try {
-    const { rowCount } = await db.query(
-      `DELETE FROM notifications
-       WHERE id = $1 AND user_id = $2`,
-      [notificationId, userId],
-    )
-
-    if (rowCount === 0) {
-      throw new Error("Notification not found or unauthorized")
+      return parseInt(result.rows[0].count);
+    } catch (error) {
+      logger.error('Error getting unread count:', error);
+      throw error;
     }
+  }
 
-    return true
-  } catch (error) {
-    logger.error("Error deleting notification:", error)
-    throw error
+  // Delete notification
+  async deleteNotification(notificationId, userId) {
+    try {
+      const result = await query(
+        `DELETE FROM notifications 
+         WHERE id = $1 AND user_id = $2
+         RETURNING *`,
+        [notificationId, userId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error('Notification not found or access denied');
+      }
+
+      return result.rows[0];
+    } catch (error) {
+      logger.error('Error deleting notification:', error);
+      throw error;
+    }
   }
 }
 
-/**
- * Get unread notification count for a user
- * @param {string} userId - User ID
- * @returns {Promise<number>} - Unread notification count
- */
-const getUnreadCount = async (userId) => {
-  try {
-    const { rows } = await db.query(
-      `SELECT COUNT(*) as count
-       FROM notifications
-       WHERE user_id = $1 AND read = false`,
-      [userId],
-    )
-
-    return Number.parseInt(rows[0].count)
-  } catch (error) {
-    logger.error("Error getting unread notification count:", error)
-    throw error
-  }
-}
-
-module.exports = {
-  createNotification,
-  createBulkNotifications,
-  getUserNotifications,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  deleteNotification,
-  getUnreadCount,
-}
+module.exports = new NotificationService();

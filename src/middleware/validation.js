@@ -1,321 +1,166 @@
-const { body, param, query, validationResult } = require('express-validator');
+const Joi = require('joi');
 
-// Middleware to handle validation errors
-const handleValidationErrors = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
+// Validation middleware
+const validate = (schema) => {
+  return (req, res, next) => {
+    const { error } = schema.validate(req.body);
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        details: error.details.map(detail => detail.message)
+      });
+    }
+    next();
+  };
+};
+
+// UUID validation
+const validateUUID = (req, res, next) => {
+  const { id } = req.params;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  
+  if (!uuidRegex.test(id)) {
     return res.status(400).json({
       success: false,
-      message: 'Validation failed',
-      errors: errors.array()
+      message: 'Invalid ID format'
     });
   }
+  
   next();
 };
 
-// User validation rules
-const validateUserRegistration = [
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address'),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long'),
-  body('firstName')
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('First name must be at least 2 characters long'),
-  body('lastName')
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('Last name must be at least 2 characters long'),
-  body('role')
-    .isIn(['admin', 'tender-creator', 'vendor'])
-    .withMessage('Role must be admin, tender-creator, or vendor'),
-  handleValidationErrors
-];
+// Pagination validation
+const validatePagination = (req, res, next) => {
+  const { page = 1, limit = 10 } = req.query;
+  
+  if (isNaN(page) || page < 1) {
+    return res.status(400).json({
+      success: false,
+      message: 'Page must be a positive number'
+    });
+  }
+  
+  if (isNaN(limit) || limit < 1 || limit > 100) {
+    return res.status(400).json({
+      success: false,
+      message: 'Limit must be between 1 and 100'
+    });
+  }
+  
+  next();
+};
 
-const validateUserLogin = [
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address'),
-  body('password')
-    .notEmpty()
-    .withMessage('Password is required'),
-  handleValidationErrors
-];
+// Validation schemas
+const schemas = {
+  // User registration schema
+  register: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    first_name: Joi.string().min(2).max(50).required(),
+    last_name: Joi.string().min(2).max(50).required(),
+    role: Joi.string().valid('admin', 'tender-creator', 'vendor').required(),
+    company_name: Joi.string().max(255).optional(),
+    phone: Joi.string().max(20).optional(),
+    address: Joi.string().optional()
+  }),
 
-const validateUserUpdate = [
-  body('firstName')
-    .optional()
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('First name must be at least 2 characters long'),
-  body('lastName')
-    .optional()
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('Last name must be at least 2 characters long'),
-  body('email')
-    .optional()
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address'),
-  body('phone')
-    .optional()
-    .isMobilePhone()
-    .withMessage('Please provide a valid phone number'),
-  body('company')
-    .optional()
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('Company name must be at least 2 characters long'),
-  handleValidationErrors
-];
+  // User login schema
+  login: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().required()
+  }),
 
-const validatePasswordChange = [
-  body('currentPassword')
-    .notEmpty()
-    .withMessage('Current password is required'),
-  body('newPassword')
-    .isLength({ min: 6 })
-    .withMessage('New password must be at least 6 characters long'),
-  body('confirmPassword')
-    .custom((value, { req }) => {
-      if (value !== req.body.newPassword) {
-        throw new Error('Password confirmation does not match new password');
-      }
-      return true;
-    }),
-  handleValidationErrors
-];
+  // Tender creation schema
+  createTender: Joi.object({
+    title: Joi.string().min(5).max(255).required(),
+    description: Joi.string().min(10).required(),
+    category: Joi.string().max(100).required(),
+    budget: Joi.number().positive().required(),
+    currency: Joi.string().length(3).default('USD'),
+    deadline: Joi.date().greater('now').required(),
+    location: Joi.string().max(255).optional(),
+    requirements: Joi.object().optional(),
+    attachments: Joi.array().items(Joi.object()).optional()
+  }),
 
-// Tender validation rules
-const validateTenderCreation = [
-  body('title')
-    .trim()
-    .isLength({ min: 5, max: 200 })
-    .withMessage('Title must be between 5 and 200 characters'),
-  body('description')
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage('Description must be between 20 and 2000 characters'),
-  body('category')
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Category must be between 2 and 100 characters'),
-  body('budget')
-    .isFloat({ min: 0 })
-    .withMessage('Budget must be a positive number'),
-  body('submissionDeadline')
-    .isISO8601()
-    .toDate()
-    .custom((value) => {
-      if (new Date(value) <= new Date()) {
-        throw new Error('Submission deadline must be in the future');
-      }
-      return true;
-    }),
-  body('requirements')
-    .optional()
-    .trim()
-    .isLength({ max: 5000 })
-    .withMessage('Requirements must not exceed 5000 characters'),
-  body('location')
-    .optional()
-    .trim()
-    .isLength({ max: 200 })
-    .withMessage('Location must not exceed 200 characters'),
-  handleValidationErrors
-];
+  // Tender update schema
+  updateTender: Joi.object({
+    title: Joi.string().min(5).max(255).optional(),
+    description: Joi.string().min(10).optional(),
+    category: Joi.string().max(100).optional(),
+    budget: Joi.number().positive().optional(),
+    currency: Joi.string().length(3).optional(),
+    deadline: Joi.date().greater('now').optional(),
+    location: Joi.string().max(255).optional(),
+    requirements: Joi.object().optional(),
+    attachments: Joi.array().items(Joi.object()).optional(),
+    status: Joi.string().valid('draft', 'published', 'closed', 'awarded', 'cancelled').optional()
+  }),
 
-const validateTenderUpdate = [
-  body('title')
-    .optional()
-    .trim()
-    .isLength({ min: 5, max: 200 })
-    .withMessage('Title must be between 5 and 200 characters'),
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ min: 20, max: 2000 })
-    .withMessage('Description must be between 20 and 2000 characters'),
-  body('category')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Category must be between 2 and 100 characters'),
-  body('budget')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Budget must be a positive number'),
-  body('submissionDeadline')
-    .optional()
-    .isISO8601()
-    .toDate()
-    .custom((value) => {
-      if (new Date(value) <= new Date()) {
-        throw new Error('Submission deadline must be in the future');
-      }
-      return true;
-    }),
-  body('requirements')
-    .optional()
-    .trim()
-    .isLength({ max: 5000 })
-    .withMessage('Requirements must not exceed 5000 characters'),
-  body('location')
-    .optional()
-    .trim()
-    .isLength({ max: 200 })
-    .withMessage('Location must not exceed 200 characters'),
-  handleValidationErrors
-];
+  // Bid creation schema
+  createBid: Joi.object({
+    tender_id: Joi.string().uuid().required(),
+    amount: Joi.number().positive().required(),
+    currency: Joi.string().length(3).default('USD'),
+    delivery_time: Joi.number().integer().min(1).required(),
+    proposal: Joi.string().min(10).required(),
+    documents: Joi.array().items(Joi.object({
+      file_name: Joi.string().required(),
+      file_path: Joi.string().required(),
+      file_size: Joi.number().positive().required(),
+      file_type: Joi.string().required()
+    })).optional()
+  }),
 
-// Bid validation rules
-const validateBidCreation = [
-  body('amount')
-    .isFloat({ min: 0 })
-    .withMessage('Bid amount must be a positive number'),
-  body('proposal')
-    .trim()
-    .isLength({ min: 50, max: 5000 })
-    .withMessage('Proposal must be between 50 and 5000 characters'),
-  body('deliveryTime')
-    .isInt({ min: 1 })
-    .withMessage('Delivery time must be at least 1 day'),
-  body('notes')
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Notes must not exceed 1000 characters'),
-  handleValidationErrors
-];
+  // Bid update schema
+  updateBid: Joi.object({
+    amount: Joi.number().positive().optional(),
+    currency: Joi.string().length(3).optional(),
+    delivery_time: Joi.number().integer().min(1).optional(),
+    proposal: Joi.string().min(10).optional(),
+    documents: Joi.array().items(Joi.object({
+      file_name: Joi.string().required(),
+      file_path: Joi.string().required(),
+      file_size: Joi.number().positive().required(),
+      file_type: Joi.string().required()
+    })).optional()
+  }),
 
-const validateBidUpdate = [
-  body('amount')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Bid amount must be a positive number'),
-  body('proposal')
-    .optional()
-    .trim()
-    .isLength({ min: 50, max: 5000 })
-    .withMessage('Proposal must be between 50 and 5000 characters'),
-  body('deliveryTime')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Delivery time must be at least 1 day'),
-  body('notes')
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Notes must not exceed 1000 characters'),
-  handleValidationErrors
-];
+  // Vendor invitation schema
+  inviteVendors: Joi.object({
+    vendorIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
+    message: Joi.string().max(500).optional()
+  }),
 
-// Comment validation rules
-const validateCommentCreation = [
-  body('content')
-    .trim()
-    .isLength({ min: 5, max: 1000 })
-    .withMessage('Comment must be between 5 and 1000 characters'),
-  handleValidationErrors
-];
+  // Comment creation schema
+  createComment: Joi.object({
+    content: Joi.string().min(1).max(1000).required(),
+    parent_id: Joi.string().uuid().optional()
+  }),
 
-// Vendor invitation validation rules
-const validateVendorInvitation = [
-  body('vendorIds')
-    .isArray({ min: 1 })
-    .withMessage('At least one vendor must be selected'),
-  body('vendorIds.*')
-    .isUUID()
-    .withMessage('Invalid vendor ID format'),
-  body('message')
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage('Message must not exceed 500 characters'),
-  handleValidationErrors
-];
+  // Pagination schema
+  pagination: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).max(100).optional(),
+    search: Joi.string().max(100).optional(),
+    status: Joi.string().optional(),
+    category: Joi.string().optional(),
+    unread_only: Joi.boolean().optional()
+  })
+};
 
-// Parameter validation
-const validateUUID = [
-  param('id')
-    .isUUID()
-    .withMessage('Invalid ID format'),
-  handleValidationErrors
-];
-
-// Query validation for pagination and filtering
-const validatePagination = [
-  query('page')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('Page must be a positive integer'),
-  query('limit')
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage('Limit must be between 1 and 100'),
-  query('search')
-    .optional()
-    .trim()
-    .isLength({ max: 100 })
-    .withMessage('Search term must not exceed 100 characters'),
-  query('status')
-    .optional()
-    .isIn(['draft', 'published', 'closed', 'awarded'])
-    .withMessage('Invalid status value'),
-  query('category')
-    .optional()
-    .trim()
-    .isLength({ max: 100 })
-    .withMessage('Category must not exceed 100 characters'),
-  handleValidationErrors
-];
-
-// Password reset validation
-const validatePasswordReset = [
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address'),
-  handleValidationErrors
-];
-
-const validatePasswordResetConfirm = [
-  body('token')
-    .notEmpty()
-    .withMessage('Reset token is required'),
-  body('password')
-    .isLength({ min: 6 })
-    .withMessage('Password must be at least 6 characters long'),
-  body('confirmPassword')
-    .custom((value, { req }) => {
-      if (value !== req.body.password) {
-        throw new Error('Password confirmation does not match password');
-      }
-      return true;
-    }),
-  handleValidationErrors
-];
+// Specific validation functions
+const validateTenderCreation = validate(schemas.createTender);
+const validateTenderUpdate = validate(schemas.updateTender);
+const validateVendorInvitation = validate(schemas.inviteVendors);
 
 module.exports = {
-  handleValidationErrors,
-  validateUserRegistration,
-  validateUserLogin,
-  validateUserUpdate,
-  validatePasswordChange,
-  validateTenderCreation,
-  validateTenderUpdate,
-  validateBidCreation,
-  validateBidUpdate,
-  validateCommentCreation,
-  validateVendorInvitation,
+  validate,
   validateUUID,
   validatePagination,
-  validatePasswordReset,
-  validatePasswordResetConfirm
+  validateTenderCreation,
+  validateTenderUpdate,
+  validateVendorInvitation,
+  schemas
 };
