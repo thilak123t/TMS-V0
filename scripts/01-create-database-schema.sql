@@ -1,5 +1,5 @@
--- Create database (run this separately if needed)
--- CREATE DATABASE tender_management;
+-- Create database schema for Tender Management System
+-- PostgreSQL Database Schema
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
