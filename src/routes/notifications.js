@@ -1,5 +1,5 @@
 const express = require('express');
-const { authenticateToken } = require('../middleware/auth');
+const { auth: authenticateToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { asyncHandler } = require('../middleware/errorHandler');
 const notificationService = require('../services/notificationService');

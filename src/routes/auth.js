@@ -15,6 +15,11 @@ const generateToken = (id) => {
   });
 };
 
+// Test endpoint for /api/auth
+router.get('/', (req, res) => {
+  res.json({ success: true, message: 'Auth route is working' });
+});
+
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public

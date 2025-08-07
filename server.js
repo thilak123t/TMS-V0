@@ -15,7 +15,8 @@ app.use(helmet());
 // CORS configuration
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
 
 // Rate limiting
@@ -48,15 +49,16 @@ app.get('/health', (req, res) => {
   });
 });
 
-// API routes
+// // API routes
 app.use('/api/auth', require('./src/routes/auth'));
-app.use('/api/users', require('./src/routes/users'));
-app.use('/api/tenders', require('./src/routes/tenders'));
-app.use('/api/bids', require('./src/routes/bids'));
-app.use('/api/comments', require('./src/routes/comments'));
-app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/register', require('./src/routes/auth'));
+// app.use('/api/tenders', require('./src/routes/tenders'));
+// app.use('/api/bids', require('./src/routes/bids'));
+// app.use('/api/comments', require('./src/routes/comments'));
+// app.use('/api/notifications', require('./src/routes/notifications'));
 app.use('/api/dashboard', require('./src/routes/dashboard'));
 app.use('/api/uploads', require('./src/routes/uploads'));
+app.use('/api/', require('./src/routes/uploads'));
 
 // 404 handler
 app.use(notFound);

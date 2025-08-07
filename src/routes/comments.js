@@ -1,6 +1,6 @@
 const express = require("express")
 const { query } = require("../config/database")
-const { authenticateToken } = require("../middleware/auth")
+const { auth: authenticateToken } = require("../middleware/auth")
 const { validate, schemas } = require("../middleware/validation")
 const logger = require("../utils/logger")
 const { createNotification } = require("../services/notificationService")

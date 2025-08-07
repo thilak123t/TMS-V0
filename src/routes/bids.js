@@ -1,7 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const { query, transaction } = require("../config/database")
-const { authenticateToken, authorizeRoles } = require("../middleware/auth");
+const { auth: authenticateToken, authorize: authorizeRoles } = require("../middleware/auth");
 const { validate, schemas } = require("../middleware/validation")
 const logger = require("../utils/logger")
 const notificationService = require("../services/notificationService")

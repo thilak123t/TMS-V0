@@ -1,6 +1,6 @@
 const express = require('express');
 const { query } = require('../config/database');
-const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+const { auth: authenticateToken, authorize: authorizeRoles } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 

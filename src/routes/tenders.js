@@ -1,6 +1,6 @@
 const express = require('express');
 const { Pool } = require('pg');
-const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+const { auth: authenticateToken, authorize: authorizeRoles } = require('../middleware/auth');
 const { 
   validateTenderCreation, 
   validateTenderUpdate, 
@@ -29,137 +29,137 @@ const asyncHandler = (fn) => (req, res, next) => {
 // @route   GET /api/tenders
 // @desc    Get all tenders with filtering and pagination
 // @access  Private
-router.get('/', authenticateToken, validatePagination, asyncHandler(async (req, res) => {
-  const {
-    page = 1,
-    limit = 10,
-    search,
-    status,
-    category,
-    sortBy = 'created_at',
-    sortOrder = 'DESC'
-  } = req.query;
+// router.get('/', authenticateToken, validatePagination, asyncHandler(async (req, res) => {
+//   const {
+//     page = 1,
+//     limit = 10,
+//     search,
+//     status,
+//     category,
+//     sortBy = 'created_at',
+//     sortOrder = 'DESC'
+//   } = req.query;
 
-  const offset = (page - 1) * limit;
+//   const offset = (page - 1) * limit;
   
-  try {
-    let query = `
-      SELECT t.*, u.first_name as creator_first_name, u.last_name as creator_last_name, 
-             u.company_name as creator_company, COUNT(b.id) as bid_count
-      FROM tenders t
-      LEFT JOIN users u ON t.created_by = u.id
-      LEFT JOIN bids b ON t.id = b.tender_id
-      WHERE 1=1
-    `;
+//   try {
+//     let query = `
+//       SELECT t.*, u.first_name as creator_first_name, u.last_name as creator_last_name, 
+//              u.company_name as creator_company, COUNT(b.id) as bid_count
+//       FROM tenders t
+//       LEFT JOIN users u ON t.created_by = u.id
+//       LEFT JOIN bids b ON t.id = b.tender_id
+//       WHERE 1=1
+//     `;
     
-    const queryParams = [];
-    let paramCount = 0;
+//     const queryParams = [];
+//     let paramCount = 0;
 
-    // Add filters based on user role
-    if (req.user.role === 'tender-creator') {
-      paramCount++;
-      query += ` AND t.created_by = $${paramCount}`;
-      queryParams.push(req.user.id);
-    } else if (req.user.role === 'vendor') {
-      // Vendors can only see published tenders or tenders they're invited to
-      query += ` AND (t.status = 'published' OR t.id IN (
-        SELECT tender_id FROM tender_invitations WHERE vendor_id = $${++paramCount}
-      ))`;
-      queryParams.push(req.user.id);
-    }
+//     // Add filters based on user role
+//     if (req.user.role === 'tender-creator') {
+//       paramCount++;
+//       query += ` AND t.created_by = $${paramCount}`;
+//       queryParams.push(req.user.id);
+//     } else if (req.user.role === 'vendor') {
+//       // Vendors can only see published tenders or tenders they're invited to
+//       query += ` AND (t.status = 'published' OR t.id IN (
+//         SELECT tender_id FROM tender_invitations WHERE vendor_id = $${++paramCount}
+//       ))`;
+//       queryParams.push(req.user.id);
+//     }
 
-    // Add search filter
-    if (search) {
-      paramCount++;
-      query += ` AND (t.title ILIKE $${paramCount} OR t.description ILIKE $${paramCount})`;
-      queryParams.push(`%${search}%`);
-    }
+//     // Add search filter
+//     if (search) {
+//       paramCount++;
+//       query += ` AND (t.title ILIKE $${paramCount} OR t.description ILIKE $${paramCount})`;
+//       queryParams.push(`%${search}%`);
+//     }
 
-    // Add status filter
-    if (status) {
-      paramCount++;
-      query += ` AND t.status = $${paramCount}`;
-      queryParams.push(status);
-    }
+//     // Add status filter
+//     if (status) {
+//       paramCount++;
+//       query += ` AND t.status = $${paramCount}`;
+//       queryParams.push(status);
+//     }
 
-    // Add category filter
-    if (category) {
-      paramCount++;
-      query += ` AND t.category = $${paramCount}`;
-      queryParams.push(category);
-    }
+//     // Add category filter
+//     if (category) {
+//       paramCount++;
+//       query += ` AND t.category = $${paramCount}`;
+//       queryParams.push(category);
+//     }
 
-    query += ` GROUP BY t.id, u.first_name, u.last_name, u.company_name`;
-    query += ` ORDER BY t.${sortBy} ${sortOrder}`;
-    query += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
-    queryParams.push(limit, offset);
+//     query += ` GROUP BY t.id, u.first_name, u.last_name, u.company_name`;
+//     query += ` ORDER BY t.${sortBy} ${sortOrder}`;
+//     query += ` LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+//     queryParams.push(limit, offset);
 
-    const result = await pool.query(query, queryParams);
+//     const result = await pool.query(query, queryParams);
 
-    // Get total count for pagination
-    let countQuery = `SELECT COUNT(DISTINCT t.id) as total FROM tenders t WHERE 1=1`;
-    const countParams = [];
-    let countParamCount = 0;
+//     // Get total count for pagination
+//     let countQuery = `SELECT COUNT(DISTINCT t.id) as total FROM tenders t WHERE 1=1`;
+//     const countParams = [];
+//     let countParamCount = 0;
 
-    if (req.user.role === 'tender-creator') {
-      countParamCount++;
-      countQuery += ` AND t.created_by = $${countParamCount}`;
-      countParams.push(req.user.id);
-    } else if (req.user.role === 'vendor') {
-      countQuery += ` AND (t.status = 'published' OR t.id IN (
-        SELECT tender_id FROM tender_invitations WHERE vendor_id = $${++countParamCount}
-      ))`;
-      countParams.push(req.user.id);
-    }
+//     if (req.user.role === 'tender-creator') {
+//       countParamCount++;
+//       countQuery += ` AND t.created_by = $${countParamCount}`;
+//       countParams.push(req.user.id);
+//     } else if (req.user.role === 'vendor') {
+//       countQuery += ` AND (t.status = 'published' OR t.id IN (
+//         SELECT tender_id FROM tender_invitations WHERE vendor_id = $${++countParamCount}
+//       ))`;
+//       countParams.push(req.user.id);
+//     }
 
-    if (search) {
-      countParamCount++;
-      countQuery += ` AND (t.title ILIKE $${countParamCount} OR t.description ILIKE $${countParamCount})`;
-      countParams.push(`%${search}%`);
-    }
+//     if (search) {
+//       countParamCount++;
+//       countQuery += ` AND (t.title ILIKE $${countParamCount} OR t.description ILIKE $${countParamCount})`;
+//       countParams.push(`%${search}%`);
+//     }
 
-    if (status) {
-      countParamCount++;
-      countQuery += ` AND t.status = $${countParamCount}`;
-      countParams.push(status);
-    }
+//     if (status) {
+//       countParamCount++;
+//       countQuery += ` AND t.status = $${countParamCount}`;
+//       countParams.push(status);
+//     }
 
-    if (category) {
-      countParamCount++;
-      countQuery += ` AND t.category = $${countParamCount}`;
-      countParams.push(category);
-    }
+//     if (category) {
+//       countParamCount++;
+//       countQuery += ` AND t.category = $${countParamCount}`;
+//       countParams.push(category);
+//     }
 
-    const countResult = await pool.query(countQuery, countParams);
-    const total = parseInt(countResult.rows[0].total);
+//     const countResult = await pool.query(countQuery, countParams);
+//     const total = parseInt(countResult.rows[0].total);
 
-    res.json({
-      success: true,
-      data: {
-        tenders: result.rows,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
-          totalTenders: total,
-          perPage: parseInt(limit),
-          hasNextPage: page < Math.ceil(total / limit),
-          hasPrevPage: page > 1
-        }
-      }
-    });
-  } catch (error) {
-    logger.error('Get tenders error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch tenders'
-    });
-  }
-}));
+//     res.json({
+//       success: true,
+//       data: {
+//         tenders: result.rows,
+//         pagination: {
+//           currentPage: parseInt(page),
+//           totalPages: Math.ceil(total / limit),
+//           totalTenders: total,
+//           perPage: parseInt(limit),
+//           hasNextPage: page < Math.ceil(total / limit),
+//           hasPrevPage: page > 1
+//         }
+//       }
+//     });
+//   } catch (error) {
+//     logger.error('Get tenders error:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch tenders'
+//     });
+//   }
+// }));
 
 // @route   GET /api/tenders/:id
 // @desc    Get single tender by ID
 // @access  Private
-router.get('/:id', authenticateToken, validateUUID, asyncHandler(async (req, res) => {
+router.get('/:id', authenticateToken, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   try {
