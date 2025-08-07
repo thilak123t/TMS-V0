@@ -1,0 +1,13 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "Check backend health",
+			"command": "curl -i http://localhost:5000/api/health",
+			"args": [],
+			"isBackground": false,
+			"group": "test"
+		}
+	]
+}

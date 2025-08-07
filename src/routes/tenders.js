@@ -1,6 +1,6 @@
 const express = require('express');
 const { Pool } = require('pg');
-const { authenticateToken } = require('../middleware/auth');
+const authenticateToken = require('../middleware/auth');
 const { 
   validateTenderCreation, 
   validateTenderUpdate, 

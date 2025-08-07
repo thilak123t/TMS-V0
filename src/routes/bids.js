@@ -1,7 +1,10 @@
 const express = require("express")
 const router = express.Router()
 const { query, transaction } = require("../config/database")
-const { authenticateToken, authorizeRoles } = require("../middleware/auth")
+const authenticateToken = require("../middleware/auth");
+const { authorizeRoles } = require("../middleware/auth");
+// If authorizeRoles is also exported as default or separately, import accordingly
+// const authorizeRoles = require("../middleware/authorizeRoles");
 const { validate, schemas } = require("../middleware/validation")
 const logger = require("../utils/logger")
 const notificationService = require("../services/notificationService")
