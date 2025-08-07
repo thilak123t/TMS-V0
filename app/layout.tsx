@@ -27,9 +27,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <div className="min-h-screen bg-background">
-              {children}
-            </div>
+            {children}
           </AuthProvider>
         </ThemeProvider>
       </body>

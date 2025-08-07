@@ -2,29 +2,26 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Building2, Eye, EyeOff } from 'lucide-react'
+import { Building2, Eye, EyeOff, AlertCircle } from 'lucide-react'
 import { useAuth } from "@/hooks/use-auth"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [role, setRole] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  
   const { login, isAuthenticated, user } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
     if (isAuthenticated && user) {
-      // Redirect to appropriate dashboard based on user role
+      // Redirect based on user role
       switch (user.role) {
         case 'admin':
           router.push('/admin/dashboard')
@@ -36,7 +33,7 @@ export default function LoginPage() {
           router.push('/vendor/dashboard')
           break
         default:
-          router.push('/')
+          break
       }
     }
   }, [isAuthenticated, user, router])
@@ -46,62 +43,61 @@ export default function LoginPage() {
     setError("")
     setIsLoading(true)
 
-    if (!email || !password || !role) {
-      setError("Please fill in all fields")
-      setIsLoading(false)
-      return
-    }
-
     try {
-      await login(email, password, role)
+      const success = await login(email, password)
+      if (!success) {
+        setError("Invalid email or password")
+      }
     } catch (err) {
-      setError("Invalid credentials. Please try again.")
+      setError("An error occurred during login")
     } finally {
       setIsLoading(false)
     }
   }
 
-  const handleDemoLogin = (demoRole: string) => {
-    const demoCredentials = {
-      admin: { email: "admin@tms.com", password: "admin123" },
-      "tender-creator": { email: "creator@tms.com", password: "creator123" },
-      vendor: { email: "vendor@tms.com", password: "vendor123" }
+  const fillDemoCredentials = (role: 'admin' | 'tender-creator' | 'vendor') => {
+    const credentials = {
+      admin: { email: 'admin@tms.com', password: 'admin123' },
+      'tender-creator': { email: 'creator@tms.com', password: 'creator123' },
+      vendor: { email: 'vendor@tms.com', password: 'vendor123' }
     }
-
-    const creds = demoCredentials[demoRole as keyof typeof demoCredentials]
-    if (creds) {
-      setEmail(creds.email)
-      setPassword(creds.password)
-      setRole(demoRole)
-    }
+    
+    setEmail(credentials[role].email)
+    setPassword(credentials[role].password)
+    setError("")
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-4">
-            <div className="flex items-center justify-center w-16 h-16 bg-blue-600 rounded-xl">
-              <Building2 className="h-8 w-8 text-white" />
+        <div className="text-center">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <Building2 className="h-10 w-10 text-blue-600" />
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">TMS</h1>
+              <p className="text-sm text-gray-500">Tender Management System</p>
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
-          <p className="text-gray-600 mt-2">Sign in to your TMS account</p>
+          <h2 className="text-2xl font-bold text-gray-900">Sign in to your account</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Enter your credentials to access the system
+          </p>
         </div>
 
         {/* Login Form */}
-        <Card className="shadow-xl">
-          <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-center">Sign In</CardTitle>
-            <CardDescription className="text-center">
-              Enter your credentials to access your account
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle>Login</CardTitle>
+            <CardDescription>
+              Use your email and password to sign in
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
                 <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
@@ -111,11 +107,11 @@ export default function LoginPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="Enter your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
                   required
-                  className="h-11"
+                  disabled={isLoading}
                 />
               </div>
 
@@ -125,11 +121,11 @@ export default function LoginPage() {
                   <Input
                     id="password"
                     type={showPassword ? "text" : "password"}
-                    placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
                     required
-                    className="h-11 pr-10"
+                    disabled={isLoading}
                   />
                   <Button
                     type="button"
@@ -137,6 +133,7 @@ export default function LoginPage() {
                     size="sm"
                     className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                     onClick={() => setShowPassword(!showPassword)}
+                    disabled={isLoading}
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4 text-gray-400" />
@@ -147,69 +144,67 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select value={role} onValueChange={setRole} required>
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select your role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Administrator</SelectItem>
-                    <SelectItem value="tender-creator">Tender Creator</SelectItem>
-                    <SelectItem value="vendor">Vendor</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Button 
-                type="submit" 
-                className="w-full h-11 bg-blue-600 hover:bg-blue-700" 
+              <Button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700"
                 disabled={isLoading}
               >
-                {isLoading ? "Signing in..." : "Sign In"}
+                {isLoading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
+          </CardContent>
+        </Card>
 
-            {/* Demo Accounts */}
-            <div className="mt-6 pt-6 border-t">
-              <p className="text-sm text-gray-600 text-center mb-4">
-                Try demo accounts:
-              </p>
-              <div className="grid grid-cols-1 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDemoLogin("admin")}
-                  className="text-xs"
-                >
-                  Demo Admin
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDemoLogin("tender-creator")}
-                  className="text-xs"
-                >
-                  Demo Tender Creator
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDemoLogin("vendor")}
-                  className="text-xs"
-                >
-                  Demo Vendor
-                </Button>
-              </div>
+        {/* Demo Accounts */}
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-lg">Demo Accounts</CardTitle>
+            <CardDescription>
+              Click any button below to fill in demo credentials
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-3">
+              <Button
+                variant="outline"
+                onClick={() => fillDemoCredentials('admin')}
+                disabled={isLoading}
+                className="justify-start"
+              >
+                <div className="text-left">
+                  <div className="font-medium">Admin Account</div>
+                  <div className="text-sm text-gray-500">Full system access</div>
+                </div>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => fillDemoCredentials('tender-creator')}
+                disabled={isLoading}
+                className="justify-start"
+              >
+                <div className="text-left">
+                  <div className="font-medium">Tender Creator</div>
+                  <div className="text-sm text-gray-500">Create and manage tenders</div>
+                </div>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => fillDemoCredentials('vendor')}
+                disabled={isLoading}
+                className="justify-start"
+              >
+                <div className="text-left">
+                  <div className="font-medium">Vendor Account</div>
+                  <div className="text-sm text-gray-500">View tenders and submit bids</div>
+                </div>
+              </Button>
             </div>
           </CardContent>
         </Card>
 
         {/* Footer */}
-        <div className="text-center mt-8">
-          <p className="text-sm text-gray-600">
-            &copy; 2024 Tender Management System. All rights reserved.
-          </p>
+        <div className="text-center text-sm text-gray-500">
+          <p>&copy; 2024 Tender Management System. All rights reserved.</p>
         </div>
       </div>
     </div>

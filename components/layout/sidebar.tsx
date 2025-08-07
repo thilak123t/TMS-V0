@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
@@ -112,10 +113,12 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
   // Handle responsive behavior
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth >= 768) {
-        setIsCollapsed(false) // Show sidebar on desktop
-      } else {
-        setIsCollapsed(true) // Hide sidebar on mobile
+      if (typeof window !== 'undefined') {
+        if (window.innerWidth >= 768) {
+          setIsCollapsed(false) // Show sidebar on desktop
+        } else {
+          setIsCollapsed(true) // Hide sidebar on mobile
+        }
       }
     }
 
@@ -175,7 +178,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="fixed top-4 left-4 z-50 md:hidden bg-background/80 backdrop-blur-sm border shadow-md"
+        className="fixed top-4 left-4 z-50 md:hidden bg-white shadow-md border"
         onClick={() => setIsCollapsed(!isCollapsed)}
         aria-label={isCollapsed ? "Open navigation menu" : "Close navigation menu"}
       >
@@ -185,8 +188,8 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       {/* Sidebar */}
       <div
         className={cn(
-          "fixed left-0 top-0 z-40 h-full w-64 bg-card border-r transition-transform duration-300 ease-in-out shadow-lg md:shadow-none md:relative md:translate-x-0",
-          isCollapsed && "-translate-x-full md:translate-x-0 md:block",
+          "fixed left-0 top-0 z-40 h-full w-64 bg-white border-r border-gray-200 transition-transform duration-300 ease-in-out shadow-lg md:shadow-none md:relative md:translate-x-0",
+          isCollapsed && "-translate-x-full md:translate-x-0",
           !isCollapsed && "translate-x-0"
         )}
         onKeyDown={handleKeyDown}
@@ -195,16 +198,12 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       >
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="p-6 border-b bg-card/50">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-10 h-10 bg-primary rounded-lg">
-                <Building2 className="h-6 w-6 text-primary-foreground" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-bold text-foreground truncate">TMS</h1>
-                <p className="text-xs text-muted-foreground capitalize truncate">
-                  {userRole.replace("-", " ")}
-                </p>
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <Building2 className="h-8 w-8 text-blue-600" />
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">TMS</h1>
+                <p className="text-xs text-gray-500 capitalize">{userRole.replace("-", " ")}</p>
               </div>
             </div>
           </div>
@@ -217,25 +216,20 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                 const isActive = isActiveRoute(item.href, pathname)
 
                 return (
-                  <Link 
-                    key={item.name} 
-                    href={item.href} 
-                    onClick={() => handleNavigation(item.href)} 
-                    className="block"
-                  >
+                  <Link key={item.name} href={item.href} onClick={() => handleNavigation(item.href)} className="block">
                     <Button
                       variant={isActive ? "secondary" : "ghost"}
                       className={cn(
-                        "w-full justify-start gap-3 h-11 px-3 transition-all duration-200 text-sm font-medium",
-                        isActive && "bg-primary/10 text-primary hover:bg-primary/15 border-r-2 border-primary",
-                        !isActive && "hover:bg-accent text-muted-foreground hover:text-foreground",
-                        isNavigating && "opacity-50"
+                        "w-full justify-start gap-3 h-10 px-3 transition-all duration-200",
+                        isActive && "bg-blue-50 text-blue-700 hover:bg-blue-100 border-r-2 border-blue-600 font-medium",
+                        !isActive && "hover:bg-gray-50 text-gray-700 hover:text-gray-900",
+                        isNavigating && "opacity-50",
                       )}
                       aria-current={isActive ? "page" : undefined}
                       role="menuitem"
                       disabled={isNavigating}
                     >
-                      <Icon className={cn("h-4 w-4 flex-shrink-0", isActive && "text-primary")} />
+                      <Icon className={cn("h-4 w-4", isActive && "text-blue-600")} />
                       <span className="truncate">{item.name}</span>
                     </Button>
                   </Link>
@@ -247,17 +241,17 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
           <Separator />
 
           {/* User Profile */}
-          <div className="p-4 border-t bg-card/50">
+          <div className="p-4 border-t border-gray-100">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start gap-3 p-3 h-auto hover:bg-accent"
+                  className="w-full justify-start gap-3 p-2 h-auto hover:bg-gray-50"
                   aria-label="User menu"
                 >
-                  <Avatar className="h-8 w-8 flex-shrink-0">
+                  <Avatar className="h-8 w-8">
                     <AvatarImage src="/placeholder.svg?height=32&width=32" />
-                    <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                    <AvatarFallback className="bg-blue-100 text-blue-700 text-sm font-medium">
                       {currentUserData.name
                         .split(" ")
                         .map((n) => n[0])
@@ -266,12 +260,8 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 text-left min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">
-                      {currentUserData.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {currentUserData.email}
-                    </p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{currentUserData.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{currentUserData.email}</p>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
@@ -293,7 +283,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                   Profile Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>
