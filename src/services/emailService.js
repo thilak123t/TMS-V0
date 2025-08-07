@@ -76,7 +76,7 @@ class EmailService {
         <h1>Bid Submitted Successfully</h1>
         <p>Hello {{vendorName}},</p>
         <p>Your bid for the tender "{{tenderTitle}}" has been submitted successfully.</p>
-        <p><strong>Bid Amount:</strong> ${{bidAmount}}</p>
+        <p><strong>Bid Amount:</strong> $` + `{{bidAmount}}` + `</p>
         <p><strong>Submitted At:</strong> {{submittedAt}}</p>
         <p>You will be notified once the tender evaluation is complete.</p>
         <p>Best regards,<br>Tender Management Team</p>
@@ -85,7 +85,7 @@ class EmailService {
         <h1>Congratulations! Tender Awarded</h1>
         <p>Hello {{vendorName}},</p>
         <p>Congratulations! Your bid for the tender "{{tenderTitle}}" has been selected.</p>
-        <p><strong>Winning Bid Amount:</strong> ${{bidAmount}}</p>
+        <p><strong>Winning Bid Amount:</strong> $` + `{{bidAmount}}` + `</p>
         <p>Our team will contact you soon with further details.</p>
         <p>Best regards,<br>Tender Management Team</p>
       `)
