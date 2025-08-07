@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
@@ -17,7 +16,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Building2, LayoutDashboard, Users, FileText, UserCheck, Settings, LogOut, Menu, X, Gavel } from "lucide-react"
+import { Building2, LayoutDashboard, Users, FileText, UserCheck, Settings, LogOut, Menu, X, Gavel } from 'lucide-react'
 import { cn } from "@/lib/utils"
 import { isActiveRoute, NavigationManager } from "@/lib/navigation-utils"
 
@@ -49,18 +48,20 @@ const navigationItems = {
 // Get user data based on role with fallbacks
 const getUserData = (userRole: string, userName?: string, userEmail?: string) => {
   // Try to get updated profile data from localStorage first
-  const profileKey = `${userRole}Profile`
-  const savedProfile = localStorage.getItem(profileKey)
+  if (typeof window !== 'undefined') {
+    const profileKey = `${userRole}Profile`
+    const savedProfile = localStorage.getItem(profileKey)
 
-  if (savedProfile) {
-    try {
-      const profile = JSON.parse(savedProfile)
-      return {
-        name: `${profile.firstName} ${profile.lastName}`,
-        email: profile.email,
+    if (savedProfile) {
+      try {
+        const profile = JSON.parse(savedProfile)
+        return {
+          name: `${profile.firstName} ${profile.lastName}`,
+          email: profile.email,
+        }
+      } catch (error) {
+        console.error("Error parsing saved profile:", error)
       }
-    } catch (error) {
-      console.error("Error parsing saved profile:", error)
     }
   }
 
@@ -80,7 +81,7 @@ const getUserData = (userRole: string, userName?: string, userEmail?: string) =>
 }
 
 export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(true) // Start collapsed on mobile
   const [isNavigating, setIsNavigating] = useState(false)
   const [currentUserData, setCurrentUserData] = useState(() => getUserData(userRole, userName, userEmail))
   const pathname = usePathname()
@@ -93,27 +94,45 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       setCurrentUserData(updatedData)
     }
 
-    // Listen for storage changes (profile updates)
-    window.addEventListener("storage", handleProfileUpdate)
+    if (typeof window !== 'undefined') {
+      // Listen for storage changes (profile updates)
+      window.addEventListener("storage", handleProfileUpdate)
+      // Listen for custom profile update events
+      window.addEventListener("profileUpdated", handleProfileUpdate)
+      // Check for updates on mount
+      handleProfileUpdate()
 
-    // Listen for custom profile update events
-    window.addEventListener("profileUpdated", handleProfileUpdate)
-
-    // Check for updates on mount
-    handleProfileUpdate()
-
-    return () => {
-      window.removeEventListener("storage", handleProfileUpdate)
-      window.removeEventListener("profileUpdated", handleProfileUpdate)
+      return () => {
+        window.removeEventListener("storage", handleProfileUpdate)
+        window.removeEventListener("profileUpdated", handleProfileUpdate)
+      }
     }
   }, [userRole, userName, userEmail])
 
-  const handleLogout = () => {
-    // Clear all stored data
-    localStorage.removeItem(`${userRole}Profile`)
-    localStorage.removeItem("sessionTimeout")
-    localStorage.removeItem("userSession")
+  // Handle responsive behavior
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setIsCollapsed(false) // Show sidebar on desktop
+      } else {
+        setIsCollapsed(true) // Hide sidebar on mobile
+      }
+    }
 
+    if (typeof window !== 'undefined') {
+      handleResize() // Set initial state
+      window.addEventListener('resize', handleResize)
+      return () => window.removeEventListener('resize', handleResize)
+    }
+  }, [])
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      // Clear all stored data
+      localStorage.removeItem(`${userRole}Profile`)
+      localStorage.removeItem("sessionTimeout")
+      localStorage.removeItem("userSession")
+    }
     // Redirect to login
     router.push("/login")
   }
@@ -123,7 +142,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
     setIsNavigating(true)
 
     // Auto-close mobile menu on navigation
-    if (window.innerWidth < 768) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setIsCollapsed(true)
     }
 
@@ -156,7 +175,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="fixed top-4 left-4 z-50 md:hidden"
+        className="fixed top-4 left-4 z-50 md:hidden bg-background/80 backdrop-blur-sm border shadow-md"
         onClick={() => setIsCollapsed(!isCollapsed)}
         aria-label={isCollapsed ? "Open navigation menu" : "Close navigation menu"}
       >
@@ -166,8 +185,9 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       {/* Sidebar */}
       <div
         className={cn(
-          "fixed left-0 top-0 z-40 h-full w-64 bg-white border-r border-gray-200 transition-transform duration-300 ease-in-out shadow-lg md:shadow-none",
-          isCollapsed && "-translate-x-full md:translate-x-0",
+          "fixed left-0 top-0 z-40 h-full w-64 bg-card border-r transition-transform duration-300 ease-in-out shadow-lg md:shadow-none md:relative md:translate-x-0",
+          isCollapsed && "-translate-x-full md:translate-x-0 md:block",
+          !isCollapsed && "translate-x-0"
         )}
         onKeyDown={handleKeyDown}
         role="complementary"
@@ -175,12 +195,16 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
       >
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="p-6 border-b border-gray-100">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-8 w-8 text-blue-600" />
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">TMS</h1>
-                <p className="text-xs text-muted-foreground capitalize">{userRole.replace("-", " ")}</p>
+          <div className="p-6 border-b bg-card/50">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-10 h-10 bg-primary rounded-lg">
+                <Building2 className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl font-bold text-foreground truncate">TMS</h1>
+                <p className="text-xs text-muted-foreground capitalize truncate">
+                  {userRole.replace("-", " ")}
+                </p>
               </div>
             </div>
           </div>
@@ -193,20 +217,25 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                 const isActive = isActiveRoute(item.href, pathname)
 
                 return (
-                  <Link key={item.name} href={item.href} onClick={() => handleNavigation(item.href)} className="block">
+                  <Link 
+                    key={item.name} 
+                    href={item.href} 
+                    onClick={() => handleNavigation(item.href)} 
+                    className="block"
+                  >
                     <Button
                       variant={isActive ? "secondary" : "ghost"}
                       className={cn(
-                        "w-full justify-start gap-3 h-10 px-3 transition-all duration-200",
-                        isActive && "bg-blue-50 text-blue-700 hover:bg-blue-100 border-r-2 border-blue-600 font-medium",
-                        !isActive && "hover:bg-gray-50 text-gray-700 hover:text-gray-900",
-                        isNavigating && "opacity-50",
+                        "w-full justify-start gap-3 h-11 px-3 transition-all duration-200 text-sm font-medium",
+                        isActive && "bg-primary/10 text-primary hover:bg-primary/15 border-r-2 border-primary",
+                        !isActive && "hover:bg-accent text-muted-foreground hover:text-foreground",
+                        isNavigating && "opacity-50"
                       )}
                       aria-current={isActive ? "page" : undefined}
                       role="menuitem"
                       disabled={isNavigating}
                     >
-                      <Icon className={cn("h-4 w-4", isActive && "text-blue-600")} />
+                      <Icon className={cn("h-4 w-4 flex-shrink-0", isActive && "text-primary")} />
                       <span className="truncate">{item.name}</span>
                     </Button>
                   </Link>
@@ -218,17 +247,17 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
           <Separator />
 
           {/* User Profile */}
-          <div className="p-4 border-t border-gray-100">
+          <div className="p-4 border-t bg-card/50">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="w-full justify-start gap-3 p-2 h-auto hover:bg-gray-50"
+                  className="w-full justify-start gap-3 p-3 h-auto hover:bg-accent"
                   aria-label="User menu"
                 >
-                  <Avatar className="h-8 w-8">
+                  <Avatar className="h-8 w-8 flex-shrink-0">
                     <AvatarImage src="/placeholder.svg?height=32&width=32" />
-                    <AvatarFallback className="bg-blue-100 text-blue-700 text-sm font-medium">
+                    <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
                       {currentUserData.name
                         .split(" ")
                         .map((n) => n[0])
@@ -237,8 +266,12 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 text-left min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{currentUserData.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{currentUserData.email}</p>
+                    <p className="text-sm font-medium text-foreground truncate">
+                      {currentUserData.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {currentUserData.email}
+                    </p>
                   </div>
                 </Button>
               </DropdownMenuTrigger>
@@ -249,7 +282,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                   className="cursor-pointer"
                   onClick={() => {
                     // Close mobile menu if open
-                    if (window.innerWidth < 768) {
+                    if (typeof window !== 'undefined' && window.innerWidth < 768) {
                       setIsCollapsed(true)
                     }
                     // Navigate to profile settings page
@@ -260,7 +293,7 @@ export function Sidebar({ userRole, userName, userEmail }: SidebarProps) {
                   Profile Settings
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
                 </DropdownMenuItem>
