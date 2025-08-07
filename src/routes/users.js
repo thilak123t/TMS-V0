@@ -1,31 +1,17 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { Pool } = require('pg');
-const auth = require('../middleware/auth');
+const { pool } = require('../config/database');
+const { auth, authorize } = require('../middleware/auth');
+const { validateId, validatePagination } = require('../middleware/validation');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-});
 
 // @desc    Get all users (admin only)
 // @route   GET /api/users
 // @access  Private/Admin
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, authorize('admin'), validatePagination, async (req, res) => {
   try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
     const {
       page = 1,
       limit = 10,
@@ -111,7 +97,7 @@ router.get('/', auth, async (req, res) => {
 // @desc    Get users by role
 // @route   GET /api/users/role/:role
 // @access  Private/Admin
-router.get('/role/:role', auth, async (req, res) => {
+router.get('/role/:role', auth, authorize('admin'), async (req, res) => {
   try {
     const { role } = req.params;
     const validRoles = ['admin', 'tender-creator', 'vendor'];
@@ -150,7 +136,7 @@ router.get('/role/:role', auth, async (req, res) => {
 // @desc    Get user by ID
 // @route   GET /api/users/:id
 // @access  Private (own profile or admin)
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', auth, validateId, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -190,7 +176,7 @@ router.get('/:id', auth, async (req, res) => {
 // @desc    Update user profile
 // @route   PUT /api/users/:id
 // @access  Private (own profile or admin)
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth, validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { first_name, last_name, company_name, phone, address } = req.body;
@@ -242,7 +228,7 @@ router.put('/:id', auth, async (req, res) => {
 // @desc    Change user password
 // @route   PUT /api/users/:id/password
 // @access  Private
-router.put('/:id/password', auth, async (req, res) => {
+router.put('/:id/password', auth, validateId, async (req, res) => {
   try {
     const { id } = req.params;
     const { currentPassword, newPassword } = req.body;
@@ -308,7 +294,7 @@ router.put('/:id/password', auth, async (req, res) => {
 // @desc    Toggle user active status (Admin only)
 // @route   PUT /api/users/:id/status
 // @access  Private
-router.put('/:id/status', auth, async (req, res) => {
+router.put('/:id/status', auth, validateId, authorize('admin'), async (req, res) => {
   try {
     const { id } = req.params;
     const { is_active } = req.body;
@@ -361,7 +347,7 @@ router.put('/:id/status', auth, async (req, res) => {
 // @desc    Delete user
 // @route   DELETE /api/users/:id
 // @access  Private/Admin
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth, validateId, authorize('admin'), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -412,7 +398,7 @@ router.delete('/:id', auth, async (req, res) => {
 // @desc    Create new user (admin only)
 // @route   POST /api/users
 // @access  Private/Admin
-router.post('/', auth, async (req, res) => {
+router.post('/', auth, authorize('admin'), async (req, res) => {
   try {
     const { email, password, first_name, last_name, role, company_name, phone } = req.body;
 
@@ -461,16 +447,8 @@ router.post('/', auth, async (req, res) => {
 // @desc    Get user statistics (admin only)
 // @route   GET /api/users/stats/overview
 // @access  Private/Admin
-router.get('/stats/overview', auth, async (req, res) => {
+router.get('/stats/overview', auth, authorize('admin'), async (req, res) => {
   try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
     // Get user counts by role
     const roleStats = await pool.query(`
       SELECT 

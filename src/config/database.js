@@ -1,54 +1,29 @@
 const { Pool } = require('pg');
 const logger = require('../utils/logger');
 
-// Database configuration
-const dbConfig = {
-  user: process.env.DB_USER || 'postgres',
+const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
+  port: process.env.DB_PORT || 5432,
   database: process.env.DB_NAME || 'tender_management',
+  user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || 'password',
-  port: parseInt(process.env.DB_PORT) || 5432,
-  max: 20, // Maximum number of clients in the pool
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 2000, // Return an error after 2 seconds if connection could not be established
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-};
-
-// Create connection pool
-const pool = new Pool(dbConfig);
-
-// Handle pool errors
-pool.on('error', (err) => {
-  logger.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
 });
 
 // Test database connection
-pool.connect((err, client, release) => {
-  if (err) {
-    logger.error('Error acquiring client', err.stack);
-    return;
-  }
-  logger.info('Database connected successfully');
-  release();
+pool.on('connect', () => {
+  logger.info('Connected to PostgreSQL database');
 });
 
-// Helper function to execute queries
-const query = async (text, params) => {
-  const start = Date.now();
-  try {
-    const res = await pool.query(text, params);
-    const duration = Date.now() - start;
-    logger.debug('Executed query', { text, duration, rows: res.rowCount });
-    return res;
-  } catch (error) {
-    logger.error('Database query error', { text, error: error.message });
-    throw error;
-  }
-};
+pool.on('error', (err) => {
+  logger.error('PostgreSQL connection error:', err);
+  process.exit(-1);
+});
 
 // Helper function for transactions
-const transaction = async (callback) => {
+const withTransaction = async (callback) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -63,14 +38,7 @@ const transaction = async (callback) => {
   }
 };
 
-// Helper function to get a client from the pool
-const getClient = async () => {
-  return await pool.connect();
-};
-
 module.exports = {
   pool,
-  query,
-  transaction,
-  getClient,
+  withTransaction
 };

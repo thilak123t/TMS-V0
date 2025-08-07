@@ -1,166 +1,142 @@
-const Joi = require('joi');
+const { body, param, query, validationResult } = require('express-validator');
 
-// Validation middleware
-const validate = (schema) => {
-  return (req, res, next) => {
-    const { error } = schema.validate(req.body);
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        details: error.details.map(detail => detail.message)
-      });
-    }
-    next();
-  };
-};
-
-// UUID validation
-const validateUUID = (req, res, next) => {
-  const { id } = req.params;
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  
-  if (!uuidRegex.test(id)) {
+// Validation error handler
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
     return res.status(400).json({
       success: false,
-      message: 'Invalid ID format'
+      error: 'Validation failed',
+      details: errors.array()
     });
   }
-  
   next();
 };
+
+// User validation rules
+const validateUserRegistration = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long'),
+  body('first_name')
+    .trim()
+    .isLength({ min: 2 })
+    .withMessage('First name must be at least 2 characters long'),
+  body('last_name')
+    .trim()
+    .isLength({ min: 2 })
+    .withMessage('Last name must be at least 2 characters long'),
+  body('role')
+    .isIn(['admin', 'tender-creator', 'vendor'])
+    .withMessage('Role must be admin, tender-creator, or vendor'),
+  handleValidationErrors
+];
+
+const validateUserLogin = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required'),
+  handleValidationErrors
+];
+
+// Tender validation rules
+const validateTender = [
+  body('title')
+    .trim()
+    .isLength({ min: 5, max: 200 })
+    .withMessage('Title must be between 5 and 200 characters'),
+  body('description')
+    .trim()
+    .isLength({ min: 20 })
+    .withMessage('Description must be at least 20 characters long'),
+  body('category')
+    .trim()
+    .notEmpty()
+    .withMessage('Category is required'),
+  body('budget_min')
+    .isFloat({ min: 0 })
+    .withMessage('Minimum budget must be a positive number'),
+  body('budget_max')
+    .isFloat({ min: 0 })
+    .withMessage('Maximum budget must be a positive number')
+    .custom((value, { req }) => {
+      if (parseFloat(value) <= parseFloat(req.body.budget_min)) {
+        throw new Error('Maximum budget must be greater than minimum budget');
+      }
+      return true;
+    }),
+  body('deadline')
+    .isISO8601()
+    .withMessage('Deadline must be a valid date')
+    .custom((value) => {
+      if (new Date(value) <= new Date()) {
+        throw new Error('Deadline must be in the future');
+      }
+      return true;
+    }),
+  handleValidationErrors
+];
+
+// Bid validation rules
+const validateBid = [
+  body('amount')
+    .isFloat({ min: 0 })
+    .withMessage('Bid amount must be a positive number'),
+  body('proposal')
+    .trim()
+    .isLength({ min: 50 })
+    .withMessage('Proposal must be at least 50 characters long'),
+  body('delivery_time')
+    .isInt({ min: 1 })
+    .withMessage('Delivery time must be at least 1 day'),
+  handleValidationErrors
+];
+
+// Comment validation rules
+const validateComment = [
+  body('content')
+    .trim()
+    .isLength({ min: 5, max: 1000 })
+    .withMessage('Comment must be between 5 and 1000 characters'),
+  handleValidationErrors
+];
+
+// ID parameter validation
+const validateId = [
+  param('id')
+    .isInt({ min: 1 })
+    .withMessage('ID must be a positive integer'),
+  handleValidationErrors
+];
 
 // Pagination validation
-const validatePagination = (req, res, next) => {
-  const { page = 1, limit = 10 } = req.query;
-  
-  if (isNaN(page) || page < 1) {
-    return res.status(400).json({
-      success: false,
-      message: 'Page must be a positive number'
-    });
-  }
-  
-  if (isNaN(limit) || limit < 1 || limit > 100) {
-    return res.status(400).json({
-      success: false,
-      message: 'Limit must be between 1 and 100'
-    });
-  }
-  
-  next();
-};
-
-// Validation schemas
-const schemas = {
-  // User registration schema
-  register: Joi.object({
-    email: Joi.string().email().required(),
-    password: Joi.string().min(6).required(),
-    first_name: Joi.string().min(2).max(50).required(),
-    last_name: Joi.string().min(2).max(50).required(),
-    role: Joi.string().valid('admin', 'tender-creator', 'vendor').required(),
-    company_name: Joi.string().max(255).optional(),
-    phone: Joi.string().max(20).optional(),
-    address: Joi.string().optional()
-  }),
-
-  // User login schema
-  login: Joi.object({
-    email: Joi.string().email().required(),
-    password: Joi.string().required()
-  }),
-
-  // Tender creation schema
-  createTender: Joi.object({
-    title: Joi.string().min(5).max(255).required(),
-    description: Joi.string().min(10).required(),
-    category: Joi.string().max(100).required(),
-    budget: Joi.number().positive().required(),
-    currency: Joi.string().length(3).default('USD'),
-    deadline: Joi.date().greater('now').required(),
-    location: Joi.string().max(255).optional(),
-    requirements: Joi.object().optional(),
-    attachments: Joi.array().items(Joi.object()).optional()
-  }),
-
-  // Tender update schema
-  updateTender: Joi.object({
-    title: Joi.string().min(5).max(255).optional(),
-    description: Joi.string().min(10).optional(),
-    category: Joi.string().max(100).optional(),
-    budget: Joi.number().positive().optional(),
-    currency: Joi.string().length(3).optional(),
-    deadline: Joi.date().greater('now').optional(),
-    location: Joi.string().max(255).optional(),
-    requirements: Joi.object().optional(),
-    attachments: Joi.array().items(Joi.object()).optional(),
-    status: Joi.string().valid('draft', 'published', 'closed', 'awarded', 'cancelled').optional()
-  }),
-
-  // Bid creation schema
-  createBid: Joi.object({
-    tender_id: Joi.string().uuid().required(),
-    amount: Joi.number().positive().required(),
-    currency: Joi.string().length(3).default('USD'),
-    delivery_time: Joi.number().integer().min(1).required(),
-    proposal: Joi.string().min(10).required(),
-    documents: Joi.array().items(Joi.object({
-      file_name: Joi.string().required(),
-      file_path: Joi.string().required(),
-      file_size: Joi.number().positive().required(),
-      file_type: Joi.string().required()
-    })).optional()
-  }),
-
-  // Bid update schema
-  updateBid: Joi.object({
-    amount: Joi.number().positive().optional(),
-    currency: Joi.string().length(3).optional(),
-    delivery_time: Joi.number().integer().min(1).optional(),
-    proposal: Joi.string().min(10).optional(),
-    documents: Joi.array().items(Joi.object({
-      file_name: Joi.string().required(),
-      file_path: Joi.string().required(),
-      file_size: Joi.number().positive().required(),
-      file_type: Joi.string().required()
-    })).optional()
-  }),
-
-  // Vendor invitation schema
-  inviteVendors: Joi.object({
-    vendorIds: Joi.array().items(Joi.string().uuid()).min(1).required(),
-    message: Joi.string().max(500).optional()
-  }),
-
-  // Comment creation schema
-  createComment: Joi.object({
-    content: Joi.string().min(1).max(1000).required(),
-    parent_id: Joi.string().uuid().optional()
-  }),
-
-  // Pagination schema
-  pagination: Joi.object({
-    page: Joi.number().integer().min(1).optional(),
-    limit: Joi.number().integer().min(1).max(100).optional(),
-    search: Joi.string().max(100).optional(),
-    status: Joi.string().optional(),
-    category: Joi.string().optional(),
-    unread_only: Joi.boolean().optional()
-  })
-};
-
-// Specific validation functions
-const validateTenderCreation = validate(schemas.createTender);
-const validateTenderUpdate = validate(schemas.updateTender);
-const validateVendorInvitation = validate(schemas.inviteVendors);
+const validatePagination = [
+  query('page')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Page must be a positive integer'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Limit must be between 1 and 100'),
+  handleValidationErrors
+];
 
 module.exports = {
-  validate,
-  validateUUID,
+  validateUserRegistration,
+  validateUserLogin,
+  validateTender,
+  validateBid,
+  validateComment,
+  validateId,
   validatePagination,
-  validateTenderCreation,
-  validateTenderUpdate,
-  validateVendorInvitation,
-  schemas
+  handleValidationErrors
 };
