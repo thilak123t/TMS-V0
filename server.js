@@ -52,7 +52,7 @@ app.get('/health', (req, res) => {
 // // API routes
 app.use('/api/auth', require('./src/routes/auth'));
 app.use('/api/register', require('./src/routes/auth'));
-// app.use('/api/tenders', require('./src/routes/tenders'));
+app.use('/api/tenders', require('./src/routes/tenders'));
 // app.use('/api/bids', require('./src/routes/bids'));
 // app.use('/api/comments', require('./src/routes/comments'));
 // app.use('/api/notifications', require('./src/routes/notifications'));

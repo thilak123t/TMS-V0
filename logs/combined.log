@@ -79,3 +79,53 @@
 {"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 15:08:20"}
 {"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 15:20:18"}
 {"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 15:20:31"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:20:58"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:21:38"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:22:56"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:22:56"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 15:34:49"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:35:16"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:35:16"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:35:16"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:35:16"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:36:04"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:41:31"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:41:31"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:41:31"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:41:31"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:47:05"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:47:35"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:51:59"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:52:09"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 15:55:58"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 15:55:59"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:04:29"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:04:30"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:04:30"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:04:41"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:07:57"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:07:57"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:07:57"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:08:04"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 16:10:09"}
+{"level":"info","message":"Server running in development mode on port 5000","service":"tender-management-api","timestamp":"2025-08-07 16:11:52"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:15:53"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:15:53"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:15:53"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:15:53"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:16:20"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:26:16"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:26:16"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:26:16"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:26:50"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:26:51"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:30:00"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:30:00"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:30:00"}
+{"level":"info","message":"User logged out: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:30:00"}
+{"level":"info","message":"User logged in: venu@adtechcorp.io","service":"tender-management-api","timestamp":"2025-08-07 16:30:12"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:32:21"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:34:03"}
+{"level":"info","message":"Connected to PostgreSQL database","service":"tender-management-api","timestamp":"2025-08-07 16:35:12"}
+{"level":"info","message":"New user registered: creator3@tms.com (vendor)","service":"tender-management-api","timestamp":"2025-08-07 16:35:13"}
+{"level":"info","message":"User logged in: creator3@tms.com","service":"tender-management-api","timestamp":"2025-08-07 16:35:22"}
